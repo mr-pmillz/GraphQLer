@@ -146,7 +146,7 @@ def run_batch(args: dict, run_target) -> int:
                     setattr(config, key, copy.deepcopy(value))
                 path = directory if len(targets) == 1 else directory / "targets" / hashlib.sha256(target.encode()).hexdigest()[:16]
                 options = {**args, "url": target, "path": str(path), "_database": database, "_formats": formats, "_output_root": directory}
-                if len(targets) > 1 or stores and stores[0].directory != directory:
+                if len(targets) > 1:
                     print(f"(B) Target {index}/{len(targets)}: {redactor.url(target)}")
                 try:
                     stores.append(run_target(options))
@@ -159,8 +159,12 @@ def run_batch(args: dict, run_target) -> int:
                     fallback = directory / "failures" / f"{hashlib.sha256(target.encode()).hexdigest()[:16]}-{uuid.uuid4().hex[:8]}"
                     store = ResultStore(fallback, target, args["mode"], args.get("customer_id"), args.get("job_id"),
                                         database=database, formats=formats, output_root=directory)
-                    store.finish("failed", str(exc))
                     stores.append(store)
+                    try:
+                        store.finish("failed", str(exc))
+                    except ResultExportError as export_error:
+                        export_failed = True
+                        print(f"(E) {export_error}", file=sys.stderr)
                     print(f"(E) {store.clean(str(exc))}", file=sys.stderr)
                 except KeyboardInterrupt as exc:
                     export_failed = export_failed or getattr(exc, "export_failed", False)
@@ -175,7 +179,7 @@ def run_batch(args: dict, run_target) -> int:
             raise
         finally:
             try:
-                if len(targets) > 1:
+                if len(targets) > 1 or (stores and stores[0].directory != directory):
                     if stores:
                         try:
                             report = batch_report(directory, stores, batch_id, formats, targets, "interrupted" if interrupted else None)

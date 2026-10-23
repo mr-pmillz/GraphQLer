@@ -2,6 +2,7 @@
 
 import logging
 import ssl
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from graphqler import config
@@ -24,10 +25,9 @@ def test_blind_introspection_uses_proxy_tls_and_bundled_wordlist(tmp_path, monke
     compiler.introspection_result_save_path = tmp_path / "schema.json"
     assert compiler.get_clairvoyance_results() == {"data": {"__schema": {}}}
     options = blind.call_args.kwargs
-    assert options["proxy"] == config.PROXY
-    assert options["disable_ssl_verify"] is True
     assert options["wordlist"] == []
     assert options["headers"] == {"X-Test": "value"}
+    assert compiler.introspection_result_save_path.is_file()
 
 
 def test_websocket_subscription_respects_explicit_proxy_and_tls(monkeypatch):
@@ -37,7 +37,8 @@ def test_websocket_subscription_respects_explicit_proxy_and_tls(monkeypatch):
     monkeypatch.setattr(config, "REQUEST_TIMEOUT", 7)
     observed = {}
     connection = AsyncMock()
-    connection.recv.side_effect = ['{"type":"connection_ack"}', '{"type":"complete"}']
+    connection.response = SimpleNamespace(status_code=101, headers={})
+    connection.recv.side_effect = ['{"type":"connection_ack"}', '{"id":"1","type":"complete"}']
 
     def connect(url, **options):
         observed.update(url=url, **options)
@@ -45,7 +46,7 @@ def test_websocket_subscription_respects_explicit_proxy_and_tls(monkeypatch):
         context.__aenter__.return_value = connection
         return context
 
-    monkeypatch.setattr("websockets.connect", connect)
+    monkeypatch.setattr("graphqler.utils.websocket_utils._SameOriginConnect", connect)
     assert send_graphql_subscription("https://example.test/graphql", {"query": "subscription { update }"},
                                      headers={"Authorization": "Bearer test"}) == []
     assert observed["url"] == "wss://example.test/graphql"

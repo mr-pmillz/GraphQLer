@@ -16,7 +16,7 @@ GraphQLer reads a TOML file passed with `--config`. Without it, `<PATH>/config.t
 | `MAX_TIME` | Fuzzing worker time budget per target; disabled in thread-based debug mode | Number | `3600` |
 | `REQUEST_TIMEOUT` | Per-request timeout in seconds | Number | `120` |
 | `PROXY` | HTTP proxy used for HTTP and HTTPS targets; `--proxy` overrides it | String | unset |
-| `VERIFY_TLS` | Verify server certificates; `--insecure` disables verification | Boolean | `true` |
+| `VERIFY_TLS` | Verify server certificates, optionally using a CA bundle path; `--insecure` disables verification | Boolean or String | `true` |
 | `TIME_BETWEEN_REQUESTS` | Minimum delay between requests in seconds | Float | `0.001` |
 | `DEBUG` | Debug mode | Boolean | `false` |
 | `SKIP_MAXIMAL_PAYLOADS` | Skip payloads that request every possible output field | Boolean | `false` |
@@ -25,7 +25,7 @@ GraphQLer reads a TOML file passed with `--config`. Without it, `<PATH>/config.t
 | `SKIP_MISC_ATTACKS` | Skip miscellaneous detections | Boolean | `false` |
 | `SKIP_ENUMERATION_ATTACKS` | Skip field-charset and ID enumeration detections (many requests per node) | Boolean | `true` |
 | `SKIP_SUBSCRIPTIONS` | Skip subscription fuzzing (`--subscriptions` enables it) | Boolean | `true` |
-| `SUBSCRIPTION_PROTOCOL` | `graphql-transport-ws` or legacy `subscriptions-transport-ws` | String | `graphql-transport-ws` |
+| `SUBSCRIPTION_PROTOCOL` | `graphql-transport-ws` (modern) or `graphql-ws` (legacy Apollo; alias `subscriptions-transport-ws`) | String | `graphql-transport-ws` |
 | `SKIP_NODES` | Query/mutation names to skip | List | `[]` |
 | `DISABLE_MUTATIONS` | Only generate and run Query chains (`--disable-mutations`) | Boolean | `false` |
 | `SAVE_ENDPOINT_RESULTS` | Write per-endpoint result files | Boolean | `true` |

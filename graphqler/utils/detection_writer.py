@@ -10,6 +10,7 @@ For every detection (confirmed or potential) two files are written under:
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,8 +24,22 @@ if TYPE_CHECKING:
 
 
 def _safe_name(name: str) -> str:
-    """Sanitize a string so it is safe to use as a directory name."""
-    return re.sub(r'[^\w\-]', '_', name).strip("_")
+    """Create bounded, collision-resistant names without embedding credentials."""
+    from graphqler.output import active_store
+    from graphqler.output.redaction import Redactor
+    store = active_store()
+    redactor = store.redactor if store else Redactor()
+    redactor.capture()
+    original = name
+    if name.startswith(("http://", "https://")):
+        redactor.remember_url(name)
+        name = redactor.url(name)
+    name = redactor.text(name)
+    safe = re.sub(r'[^A-Za-z0-9_\-]', '_', name).strip("_")
+    if safe != original or len(safe) > 120 or not safe:
+        digest = hashlib.sha256(original.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
+        safe = f"{safe[:96] or 'node'}-{digest}"
+    return safe
 
 
 def _fmt_response(graphql_response: object) -> str:
@@ -136,7 +151,7 @@ def write_from_chain(
         f.write("\n=== Chain ===\n")
         for i, step in enumerate(chain.steps):
             is_detected = (
-                step.node.name == detected_node_name
+                detected_node_name in {step.node.name, step.node.qualified_name}
                 and step.profile_name == detected_step.profile_name
             )
             marker = "  <-- detected here" if is_detected else ""

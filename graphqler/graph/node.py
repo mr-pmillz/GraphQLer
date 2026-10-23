@@ -17,6 +17,11 @@ class Node:
         self.name = name
         self.body = body
 
+    @property
+    def qualified_name(self) -> str:
+        """Distinguish same-named fields on different GraphQL operation roots."""
+        return f"{self.graphql_type}|{self.name}" if self.graphql_type in {"Query", "Mutation", "Subscription"} else self.name
+
     def set_mutation_type(self, mutation_type: str):
         """Only use this if its a mutation type
 

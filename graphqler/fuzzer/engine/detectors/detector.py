@@ -89,7 +89,7 @@ class Detector(ABC):
         evidence = self._get_evidence(graphql_response, request_response)
         Stats().add_vulnerability(
             self.DETECTION_NAME,
-            self.name,
+            self.node.qualified_name,
             self.confirmed_vulnerable,
             self.potentially_vulnerable,
             payload=self.payload,
@@ -97,7 +97,7 @@ class Detector(ABC):
         )
         detection_writer.write_from_detector(
             vuln_name=self.DETECTION_NAME,
-            node_name=self.name,
+            node_name=self.node.qualified_name,
             is_vulnerable=self.confirmed_vulnerable,
             potentially_vulnerable=self.potentially_vulnerable,
             payload=self.payload,

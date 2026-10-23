@@ -152,7 +152,7 @@ class QueryDenyBypassDetector(Detector):
             )
         Stats().add_vulnerability(
             self.DETECTION_NAME,
-            self.name,
+            self.node.qualified_name,
             self.confirmed_vulnerable,
             self.potentially_vulnerable,
             payload=aliased_payload,

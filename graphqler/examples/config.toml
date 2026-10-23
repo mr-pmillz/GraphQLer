@@ -57,15 +57,15 @@ SKIP_DOS_ATTACKS = true # This mode is for when we want to skip the DoS check
 SKIP_INJECTION_ATTACKS = false # This mode is for when we want to skip the injection check
 SKIP_MISC_ATTACKS = false # This mode is for when we want to skip the miscellaneous attacks
 SKIP_SUBSCRIPTIONS = true         # Disable subscription fuzzing by default (requires WebSocket support); enable with --subscriptions
-SUBSCRIPTION_TIMEOUT = 1          # Seconds to wait for events on each subscription
-SUBSCRIPTION_PROTOCOL = "graphql-transport-ws"  # "graphql-transport-ws" (modern) or "subscriptions-transport-ws" (legacy Apollo)
+SUBSCRIPTION_TIMEOUT = 1          # Seconds to acknowledge and collect subscription events
+SUBSCRIPTION_PROTOCOL = "graphql-transport-ws"  # "graphql-transport-ws" (modern) or "graphql-ws" (legacy Apollo)
 
 # For stats output
 SAVE_ENDPOINT_RESULTS = true  # Set false to skip writing per-endpoint result files (can be large)
 
 # For each request
 REQUEST_TIMEOUT = 120  # in seconds
-MAX_RESPONSE_BYTES = 16777216  # maximum wire and decoded HTTP response size
+MAX_RESPONSE_BYTES = 16777216  # maximum HTTP response or collected subscription message bytes
 VERIFY_TLS = true  # set false only when deliberately using an untrusted certificate
 TIME_BETWEEN_REQUESTS = 0.001  # in seconds
 

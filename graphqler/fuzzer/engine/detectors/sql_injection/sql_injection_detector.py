@@ -184,7 +184,7 @@ class SQLInjectionDetector(Detector):
         evidence = self._get_evidence(last_graphql_response, last_request_response)
         Stats().add_vulnerability(
             self.DETECTION_NAME,
-            self.name,
+            self.node.qualified_name,
             self.confirmed_vulnerable,
             self.potentially_vulnerable,
             payload=self.payload,
@@ -192,7 +192,7 @@ class SQLInjectionDetector(Detector):
         )
         detection_writer.write_from_detector(
             vuln_name=self.DETECTION_NAME,
-            node_name=self.name,
+            node_name=self.node.qualified_name,
             is_vulnerable=self.confirmed_vulnerable,
             potentially_vulnerable=self.potentially_vulnerable,
             payload=self.payload,

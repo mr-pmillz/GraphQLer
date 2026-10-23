@@ -66,12 +66,12 @@ class DEngine:
         """
         for misc_detector in misc_detectors:
             detector = misc_detector(api=self.api, node=node, objects_bucket=objects_bucket, graphql_type=graphql_type)
-            if not self.__should_run_detection(detector, node.name):
+            if not self.__should_run_detection(detector, node.qualified_name):
                 continue
             try:
                 is_vulnerable, potentially_vulnerable = detector.detect()
                 self.logger.info(f"Detector {detector.DETECTION_NAME} finished detecting - is_vulnerable: {is_vulnerable} - potentially_vulnerable: {potentially_vulnerable}")
-                self.__add_ran_node(node.name, detector.DETECTION_NAME)
+                self.__add_ran_node(node.qualified_name, detector.DETECTION_NAME)
             except Exception as e:
                 self.logger.error(f"Detector {detector.DETECTION_NAME} failed with error: {e}")
 
@@ -85,12 +85,12 @@ class DEngine:
         """
         for injection_detector in injection_detectors:
             detector = injection_detector(api=self.api, node=node, objects_bucket=objects_bucket, graphql_type=graphql_type)
-            if not self.__should_run_detection(detector, node.name):
+            if not self.__should_run_detection(detector, node.qualified_name):
                 continue
             try:
                 is_vulnerable, potentially_vulnerable = detector.detect()
                 self.logger.info(f"Detector {detector.DETECTION_NAME} finished detecting - is_vulnerable: {is_vulnerable} - potentially_vulnerable: {potentially_vulnerable}")
-                self.__add_ran_node(node.name, detector.DETECTION_NAME)
+                self.__add_ran_node(node.qualified_name, detector.DETECTION_NAME)
             except Exception as e:
                 self.logger.error(f"Detector {detector.DETECTION_NAME} failed with error: {e}")
 
@@ -104,12 +104,12 @@ class DEngine:
         """
         for enum_detector in enumeration_detectors:
             detector = enum_detector(api=self.api, node=node, objects_bucket=objects_bucket, graphql_type=graphql_type)
-            if not self.__should_run_detection(detector, node.name):
+            if not self.__should_run_detection(detector, node.qualified_name):
                 continue
             try:
                 is_vulnerable, potentially_vulnerable = detector.detect()
                 self.logger.info(f"Detector {detector.DETECTION_NAME} finished detecting - is_vulnerable: {is_vulnerable} - potentially_vulnerable: {potentially_vulnerable}")
-                self.__add_ran_node(node.name, detector.DETECTION_NAME)
+                self.__add_ran_node(node.qualified_name, detector.DETECTION_NAME)
             except Exception as e:
                 self.logger.error(f"Detector {detector.DETECTION_NAME} failed with error: {e}")
 

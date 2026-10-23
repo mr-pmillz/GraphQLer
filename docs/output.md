@@ -62,7 +62,7 @@ versions. Tables are joined through `run_id`:
 |---|---|
 | `runs` | Target, mode, tool version, UTC timestamps, status/error, provenance, aggregate statistics |
 | `endpoints` | Positive and negative discovery probes, method, status code, evidence |
-| `requests` | HTTP payload, response status/headers/body, elapsed time, transport error |
+| `requests` | HTTP or WebSocket payload, response status/headers/body, elapsed time, transport error |
 | `results` | Every engine observation: operation/type, success, payload, response, errors |
 | `findings` | Confirmed/potential findings with a `result_id` when matching evidence is available |
 | `artifacts` | Relative path, role, media type, original SHA-256, original/stored sizes, truncation flag, content BLOB |
@@ -89,6 +89,10 @@ If an export fails when `sqlite` was not selected, GraphQLer retains its private
 temporary catalog and prints its recovery path to stderr. Ctrl-C remains exit
 `130` even if publishing the interrupted results also fails.
 
+Operation-specific finding names include the root type, such as `Query|account`
+or `Mutation|account`, so fields with the same name keep separate findings and
+result links. API-wide findings retain their endpoint URL as the node name.
+
 Artifacts include changed outputs and the compiled schema inputs used for the run.
 Each embedded file is limited to 16 MiB; the stored size and `truncated` flag make
 this explicit. The hash describes the original file, before configured-credential
@@ -96,15 +100,22 @@ redaction and truncation. Config files, serialized Python objects, exports, and
 symlinks are excluded. Raw HTTP/result records are separate from these artifact
 previews. Custom request plugins must use the built-in transport to populate the
 `requests` table; engine-level results still record plugin executions.
-Clairvoyance's optional blind-introspection fallback uses its own HTTP client:
-its resulting schema and logs are cataloged, but its individual HTTP exchanges
-are not included in `requests`.
+Artifact paths containing credentials use unique logical names under `redacted/`;
+read their embedded `content` from SQLite instead of treating these aliases as
+filesystem paths. New detection directories use bounded names with hash suffixes
+when sanitizing or redacting a node name.
+Blind introspection uses Clairvoyance's inference engine with GraphQLer's HTTP
+transport, so its exchanges are also cataloged and follow the same proxy, TLS,
+redirect, and response-size rules. `MAX_TIME` bounds this fallback; it sends at most
+eight concurrent requests, each limited by the remaining time and `REQUEST_TIMEOUT`.
 
 Configured authentication values are redacted from structured output, and sensitive
 response headers are masked. Captured application data may still be sensitive.
 Redaction covers escaped credentials and sensitive URL query parameters while
 preserving schema keys, IDs, and status values. Output writes reject nested
 directory symlinks; database files must be regular files with a single link.
+When credentials are configured, an undecodable JSON string suffix is omitted
+with a redaction marker so malformed encoding cannot expose those credentials.
 Do not run concurrent scans against the same output directory: compilation and
 legacy working files are mutable. Use different directories for concurrent jobs.
 
@@ -161,6 +172,17 @@ An explicit `--proxy` takes precedence over environment proxy settings. Ambient
 ordinary custom headers; credentials such as Authorization, cookies, and API keys
 must be supplied explicitly for each profile. The post-delete profile uses the
 primary identity so use-after-delete checks retain the original authentication.
+
+Subscriptions also restrict redirects to the same origin and honor the proxy and
+TLS configuration, including a custom CA certificate path. The modern protocol is
+`graphql-transport-ws`; legacy Apollo uses `graphql-ws` (the configuration alias
+`subscriptions-transport-ws` is accepted). `SUBSCRIPTION_TIMEOUT` bounds the combined
+acknowledgment and event collection window after the handshake. Collection is
+limited to `MAX_RESPONSE_BYTES` decoded message bytes and 10,000 messages.
+The `requests` table uses method `WEBSOCKET`, status `101` for an accepted upgrade,
+and a JSON `messages` array in `response_body`. A protocol or limit failure records
+an error and retains earlier messages; subscription results include their payload
+and collected events. An acknowledged subscription can successfully return no events.
 
 ## Universal export
 

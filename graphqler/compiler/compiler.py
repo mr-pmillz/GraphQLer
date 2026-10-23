@@ -16,7 +16,7 @@ from graphqler.chains import ChainGenerator, TopologicalChainStrategy, IDORChain
 from graphqler.graph import GraphGenerator
 from graphqler import config
 from graphqler.output import cataloged
-from clairvoyance.cli import blind_introspection
+from graphqler.utils.blind_introspection import blind_introspection
 
 import asyncio
 import json
@@ -74,7 +74,7 @@ class Compiler:
         self.interface_list_parser = InterfaceListParser()
 
         # Initialize the logger
-        self.logger = Logger().get_compiler_logger()
+        self.logger = Logger().get_compiler_logger(save_path)
 
         # Initialize the plugins handler to get request utils
         self.request_utils = plugins_handler.get_request_utils()
@@ -111,7 +111,8 @@ class Compiler:
         write_compilation_target(self.save_path, self.url, "running")
         recreate_path(Path(self.save_path) / config.CHAINS_DIR_NAME)
         introspection_result = self.get_introspection_query_results()
-        if introspection_result is None or introspection_result == {}:
+        used_blind_introspection = introspection_result is None or introspection_result == {}
+        if used_blind_introspection:
             print("(C) Introspection query failed, trying clairvoyance")
             introspection_result = self.get_clairvoyance_results()
 
@@ -121,6 +122,10 @@ class Compiler:
         validate_schema_names(introspection_result)
         self.run_parsers_and_save(introspection_result)
         self.run_resolvers_and_save(introspection_result)
+        if used_blind_introspection:
+            from graphqler.output import active_store
+            if store := active_store():
+                store.endpoint(self.url, "POST", None, True, "Blind introspection reconstructed a GraphQL schema")
         write_compilation_target(self.save_path, self.url, "completed")
 
     def get_introspection_query_results(self) -> dict:
@@ -169,14 +174,10 @@ class Compiler:
                 logger=self.logger,
                 wordlist=wordlist,
                 headers=self.request_utils.get_headers(),
-                proxy=config.PROXY,
-                disable_ssl_verify=not config.VERIFY_TLS,
-                input_document=None,
-                input_schema_path=None,
-                output_path=str(self.introspection_result_save_path),
             )
         )
         schema = json.loads(schema_str)
+        write_json_to_file(schema, self.introspection_result_save_path)
         return schema
 
     def run_parsers_and_save(self, introspection_result: dict):

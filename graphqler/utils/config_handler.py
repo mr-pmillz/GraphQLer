@@ -5,7 +5,9 @@ from functools import wraps
 import json
 import math
 from pathlib import Path
+import re
 import tomllib
+from urllib.parse import urlsplit
 
 from graphqler import config
 from graphqler.utils.file_utils import get_graphqler_root
@@ -132,7 +134,7 @@ def set_config(new_config: dict):
 
 def validate_config() -> None:
     """Reject invalid resource limits before starting a worker or network request."""
-    for key in ("REQUEST_TIMEOUT", "MAX_TIME"):
+    for key in ("REQUEST_TIMEOUT", "MAX_TIME", "SUBSCRIPTION_TIMEOUT"):
         value = getattr(config, key)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError(f"{key} must be finite and positive")
@@ -144,6 +146,38 @@ def validate_config() -> None:
         raise ValueError("TIME_BETWEEN_REQUESTS must be finite and nonnegative")
     if not isinstance(config.CUSTOM_HEADERS, dict) or not isinstance(config.PROFILES, dict):
         raise ValueError("CUSTOM_HEADERS and PROFILES must be dictionaries")
+    for key in ("AUTHORIZATION", "IDOR_SECONDARY_AUTH", "LLM_API_KEY", "PROXY"):
+        if getattr(config, key) is not None and not isinstance(getattr(config, key), str):
+            raise ValueError(f"{key} must be a string")
+    if not isinstance(config.VERIFY_TLS, (bool, str)) or config.VERIFY_TLS == "":
+        raise ValueError("VERIFY_TLS must be a boolean or a CA certificate path")
+    if config.PROXY:
+        try:
+            parsed = urlsplit(config.PROXY)
+            if parsed.scheme not in {"http", "https", "socks4", "socks4a", "socks5", "socks5h"} or not parsed.hostname:
+                raise ValueError
+            _ = parsed.port
+        except ValueError:
+            raise ValueError("PROXY must be a valid HTTP(S) or SOCKS proxy URL") from None
+
+    def validate_headers(headers):
+        if not isinstance(headers, dict) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
+            or not isinstance(value, str) or "\r" in value or "\n" in value
+            for name, value in headers.items()
+        ):
+            raise ValueError("Headers must map valid header names to single-line strings")
+
+    validate_headers(config.CUSTOM_HEADERS)
+    for name, profile in config.PROFILES.items():
+        if not isinstance(name, str) or not isinstance(profile, (str, dict)):
+            raise ValueError("PROFILES must map names to tokens or profile dictionaries")
+        if isinstance(profile, dict):
+            if profile.get("auth_token") is not None and not isinstance(profile["auth_token"], str):
+                raise ValueError("Profile auth_token must be a string")
+            validate_headers(profile.get("headers", {}))
+    if config.SUBSCRIPTION_PROTOCOL not in ("graphql-transport-ws", "graphql-ws", "subscriptions-transport-ws"):
+        raise ValueError("SUBSCRIPTION_PROTOCOL must select a supported GraphQL WebSocket protocol")
 
 
 def generate_new_config(config_file_to_write: str) -> None:

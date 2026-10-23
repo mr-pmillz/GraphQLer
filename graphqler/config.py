@@ -5,7 +5,7 @@ DEBUG: bool = False
 
 """For proxy"""
 PROXY: str | None = None  # HTTP proxy for both HTTP and HTTPS targets; --proxy overrides it.
-VERIFY_TLS: bool = True
+VERIFY_TLS: bool | str = True  # True/False or a CA certificate bundle path.
 
 """For any authentication tokens"""
 AUTHORIZATION: str | None = None  # Don't use this, this will be overriten by argparse
@@ -110,8 +110,8 @@ SKIP_DOS_ATTACKS: bool = True  # This mode is for when we want to skip the DoS c
 SKIP_INJECTION_ATTACKS: bool = False  # This mode is for when we want to skip the injection check
 SKIP_MISC_ATTACKS: bool = False  # This mode is for when we want to skip the miscellaneous attacks
 SKIP_SUBSCRIPTIONS: bool = True  # Subscriptions require WebSocket transport; disabled by default (opt-in with --subscriptions)
-SUBSCRIPTION_TIMEOUT: int = 1  # Seconds to wait for events when executing a subscription
-SUBSCRIPTION_PROTOCOL: str = "graphql-transport-ws"  # WebSocket sub-protocol: "graphql-transport-ws" (modern) or "subscriptions-transport-ws" (legacy Apollo)
+SUBSCRIPTION_TIMEOUT: float = 1  # Seconds to acknowledge and collect subscription events
+SUBSCRIPTION_PROTOCOL: str = "graphql-transport-ws"  # "graphql-transport-ws" (modern) or "graphql-ws" (legacy Apollo)
 
 """For NoSQL blind extraction"""
 NOSQLI_BLIND_EXTRACTION: bool = False  # When True, attempt char-by-char data extraction after a potential NoSQLi is detected
@@ -135,7 +135,7 @@ ID_ENUMERATION_SCOPE_HEURISTIC: bool = True  # Classify endpoint scope (private/
 
 """For each request"""
 REQUEST_TIMEOUT: float = 120  # in seconds
-MAX_RESPONSE_BYTES: int = 16 * 1024 * 1024  # maximum wire and decoded HTTP response size
+MAX_RESPONSE_BYTES: int = 16 * 1024 * 1024  # maximum HTTP response or collected subscription message bytes
 TIME_BETWEEN_REQUESTS: float = 0.001  # in seconds
 
 """For custom skipping nodes"""

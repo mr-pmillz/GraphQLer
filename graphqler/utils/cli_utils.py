@@ -1,7 +1,7 @@
 from graphqler import config
 from pathlib import Path
 import json
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 def set_auth_token_constant(auth_argument: str) -> None:
@@ -71,14 +71,27 @@ def compiled_target(path: str | Path, target: str) -> str:
     data = json.loads(marker.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("status") != "completed":
         raise ValueError("Compilation is incomplete; compile this target again")
-    clean_target = Redactor().url(target)
+    redactor = Redactor()
+    redactor.capture()
+    clean_target = redactor.url(target)
     endpoint = validate_url(data["endpoint"])
     if clean_target not in {data["requested"], endpoint} or _origin(target) != _origin(endpoint):
         raise ValueError("Compiled artifacts belong to a different target; use a separate output directory or compile again")
     if clean_target == endpoint:
         return target
-    # Query credentials come from this invocation, never the saved redacted marker.
-    return urlunsplit(urlsplit(target)._replace(path=urlsplit(endpoint).path))
+    # Retain routing parameters selected by discovery; refresh redacted credentials.
+    current_query: dict[str, list[str]] = {}
+    for key, value in parse_qsl(urlsplit(target).query, keep_blank_values=True):
+        current_query.setdefault(key, []).append(value)
+    selected = urlsplit(endpoint)
+    query = []
+    for key, value in parse_qsl(selected.query, keep_blank_values=True):
+        if "[REDACTED]" in value:
+            if not current_query.get(key):
+                raise ValueError("Compiled endpoint needs fresh query credentials; provide its full URL or compile again")
+            value = current_query[key].pop(0)
+        query.append((key, value))
+    return urlunsplit(selected._replace(query=urlencode(query)))
 
 
 def write_compilation_target(path: str | Path, target: str, status: str) -> None:

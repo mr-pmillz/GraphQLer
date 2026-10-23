@@ -7,8 +7,9 @@ import stat
 import tempfile
 
 
-def ensure_directory(path: Path, root: Path) -> None:
+def ensure_directory(path: Path, root: Path) -> Path:
     """Reject nested symlinks and paths outside the selected output root."""
+    path, root = Path(os.path.abspath(path)), Path(os.path.abspath(root))
     relative = path.relative_to(root)
     current = root
     for part in relative.parts:
@@ -16,11 +17,13 @@ def ensure_directory(path: Path, root: Path) -> None:
         if current.is_symlink():
             raise ValueError(f"Output directory contains a symlink: {current}")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return path
 
 
 @contextmanager
 def atomic_writer(path: Path, root: Path):
     """Publish a UTF-8 file only after its writer succeeds; new files are private."""
+    path = Path(os.path.abspath(path))
     ensure_directory(path.parent, root)
     descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
@@ -49,6 +52,7 @@ def prepare_database(path: Path) -> None:
 
 def remove_output(path: Path, root: Path) -> None:
     """Remove an obsolete export without traversing a symlinked subdirectory."""
+    path, root = Path(os.path.abspath(path)), Path(os.path.abspath(root))
     current = root
     for part in path.parent.relative_to(root).parts:
         current = current / part

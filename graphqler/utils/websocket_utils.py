@@ -1,138 +1,179 @@
-"""WebSocket utilities for GraphQL subscriptions.
-
-Supports two sub-protocols:
-  - "graphql-ws"                 (modern, RFC-compliant; https://github.com/enisdenjo/graphql-ws)
-  - "subscriptions-transport-ws" (legacy Apollo; https://github.com/apollographql/subscriptions-transport-ws)
-"""
+"""Bounded GraphQL subscription transport with cataloged evidence."""
 
 import asyncio
+from dataclasses import dataclass, field
 import json
 import logging
+import math
 import ssl
-from typing import Any, Optional, cast
+import time
+from types import SimpleNamespace
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+from websockets.asyncio.client import connect
+from websockets.typing import Subprotocol
+from websockets.uri import parse_uri
 
 from graphqler import config
+from graphqler.output import active_store
+from graphqler.output.redaction import Redactor
 
 logger = logging.getLogger(__name__)
+MAX_SUBSCRIPTION_MESSAGES = 10000
 
 
-async def _send_graphql_ws(websocket, payload: dict, timeout: float) -> list[dict]:
-    """graphql-ws protocol handler (modern standard)."""
-    # 1. Send connection_init
-    await websocket.send(json.dumps({"type": "connection_init", "payload": {}}))
+class SubscriptionError(RuntimeError):
+    """A failed subscription, retaining events received before the failure."""
 
-    # 2. Wait for connection_ack
-    ack_raw = await asyncio.wait_for(websocket.recv(), timeout=timeout)
-    ack = json.loads(ack_raw)
-    if ack.get("type") != "connection_ack":
-        return []
+    def __init__(self, message: str, events: list[dict], status_code: int | None):
+        super().__init__(message)
+        self.events = events
+        self.status_code = status_code
 
-    # 3. Send subscribe message
-    await websocket.send(json.dumps({"id": "1", "type": "subscribe", "payload": payload}))
 
-    # 4. Collect events until timeout or "complete"
-    events: list[dict] = []
-    deadline = asyncio.get_event_loop().time() + timeout
-    while True:
-        remaining = deadline - asyncio.get_event_loop().time()
+class _SameOriginConnect(connect):
+    def process_redirect(self, exc: Exception) -> Exception | str:
+        destination = super().process_redirect(exc)
+        if isinstance(destination, str):
+            old, new = parse_uri(self.uri), parse_uri(destination)
+            if (old.secure, old.host, old.port) != (new.secure, new.host, new.port) or new.user_info:
+                return ValueError("WebSocket redirect outside the target origin refused")
+        return destination
+
+
+@dataclass
+class _Observation:
+    events: list[dict] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
+    headers: dict = field(default_factory=dict)
+    status_code: int | None = None
+    received_bytes: int = 0
+
+
+async def _collect(websocket, payload: dict, timeout: float, protocol: str, observation: _Observation) -> list[dict]:
+    deadline = asyncio.get_running_loop().time() + timeout
+
+    async def receive():
+        remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
-            break
+            raise TimeoutError("Subscription acknowledgment time budget exhausted")
+        raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+        observation.received_bytes += len(raw.encode("utf-8") if isinstance(raw, str) else raw)
+        if observation.received_bytes > config.MAX_RESPONSE_BYTES or len(observation.messages) >= MAX_SUBSCRIPTION_MESSAGES:
+            raise ValueError("Subscription response exceeded the byte or message limit")
         try:
-            raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
-        except asyncio.TimeoutError:
+            message = json.loads(raw)
+        except (ValueError, RecursionError):
+            observation.messages.append({"raw": raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw})
+            raise ValueError("Subscription response is not a supported JSON message") from None
+        observation.messages.append(message)
+        if not isinstance(message, dict) or not isinstance(message.get("type"), str):
+            raise ValueError("Subscription response must be a protocol message object")
+        return message
+
+    async def keepalive(message):
+        if message["type"] == "ping":
+            pong = {"type": "pong"}
+            if "payload" in message:
+                pong["payload"] = message["payload"]
+            await asyncio.wait_for(websocket.send(json.dumps(pong)), timeout=max(0, deadline - asyncio.get_running_loop().time()))
+            return True
+        return message["type"] in {"pong", "ka"}
+
+    async with asyncio.timeout(timeout):
+        await websocket.send(json.dumps({"type": "connection_init", "payload": {}}))
+        while True:
+            message = await receive()
+            if await keepalive(message):
+                continue
+            if message["type"] != "connection_ack":
+                raise ValueError("Subscription server did not acknowledge the connection")
             break
-        msg = json.loads(raw)
-        if msg.get("type") == "next":
-            events.append(msg.get("payload", {}))
-        elif msg.get("type") == "complete":
-            break
-        elif msg.get("type") == "error":
-            break
+        modern = protocol == "graphql-transport-ws"
+        await websocket.send(json.dumps({"id": "1", "type": "subscribe" if modern else "start", "payload": payload}))
 
-    return events
-
-
-async def _send_subscriptions_transport_ws(websocket, payload: dict, timeout: float) -> list[dict]:
-    """subscriptions-transport-ws (legacy Apollo) protocol handler."""
-    # 1. Send connection_init
-    await websocket.send(json.dumps({"type": "connection_init", "payload": {}}))
-
-    # 2. Wait for connection_ack
-    ack_raw = await asyncio.wait_for(websocket.recv(), timeout=timeout)
-    ack = json.loads(ack_raw)
-    if ack.get("type") != "connection_ack":
-        return []
-
-    # 3. Send start message
-    await websocket.send(json.dumps({"id": "1", "type": "start", "payload": payload}))
-
-    # 4. Collect events until timeout or "complete"
-    events: list[dict] = []
-    deadline = asyncio.get_event_loop().time() + timeout
     while True:
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            break
         try:
-            raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
-        except asyncio.TimeoutError:
-            break
-        msg = json.loads(raw)
-        if msg.get("type") == "data":
-            events.append(msg.get("payload", {}))
-        elif msg.get("type") == "complete":
-            break
-        elif msg.get("type") == "error":
-            break
+            message = await receive()
+        except TimeoutError:
+            return observation.events
+        if await keepalive(message):
+            continue
+        if message["type"] == "connection_error":
+            raise ValueError("Subscription server rejected the connection")
+        if message.get("id") != "1":
+            continue
+        if message["type"] == ("next" if modern else "data"):
+            event = message.get("payload")
+            if not isinstance(event, dict):
+                raise ValueError("Subscription event must contain a GraphQL response object")
+            if not any(key in event for key in ("data", "errors")) or ("data" in event and event["data"] is not None and not isinstance(event["data"], dict)):
+                raise ValueError("Subscription event must contain GraphQL data or errors")
+            if "errors" in event and (not isinstance(event["errors"], list) or any(
+                not isinstance(error, dict) or not isinstance(error.get("message"), str) for error in event["errors"]
+            )):
+                raise ValueError("Subscription event contains malformed GraphQL errors")
+            observation.events.append(event)
+        elif message["type"] == "complete":
+            return observation.events
+        elif message["type"] == "error":
+            raise ValueError("Subscription server returned an operation error; inspect recorded messages")
 
-    return events
 
-
-async def _run_subscription(url: str, payload: dict, timeout: float, protocol: str, headers: Optional[dict]) -> list[dict]:
-    """Async core: connect via WebSocket and collect subscription events."""
-    try:
-        import websockets
-    except ImportError:
-        raise ImportError("The 'websockets' package is required for subscription support. Restore pinned dependencies with: uv sync --locked")
-
-    ws_url = url.replace("http://", "ws://").replace("https://", "wss://")
-    extra_headers = headers or {}
-
-    options: dict[str, Any] = {"proxy": config.PROXY or True, "open_timeout": config.REQUEST_TIMEOUT}
-    if ws_url.startswith("wss://") and not config.VERIFY_TLS:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+async def _run_subscription(url: str, payload: dict, timeout: float, protocol: str, headers: dict | None,
+                            observation: _Observation) -> list[dict]:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise ValueError("Subscription URL must use HTTP(S) or WS(S) without embedded credentials")
+    ws_url = urlunsplit(parsed._replace(scheme={"http": "ws", "https": "wss"}.get(parsed.scheme, parsed.scheme)))
+    if protocol == "subscriptions-transport-ws":
+        protocol = "graphql-ws"
+    if protocol not in {"graphql-transport-ws", "graphql-ws"}:
+        raise ValueError("Unsupported GraphQL WebSocket protocol")
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("Subscription timeout must be finite and positive")
+    options: dict[str, Any] = {
+        "proxy": config.PROXY or True, "open_timeout": config.REQUEST_TIMEOUT,
+        "close_timeout": min(1, config.REQUEST_TIMEOUT, timeout), "max_size": config.MAX_RESPONSE_BYTES, "max_queue": 1,
+    }
+    if parsed.scheme in {"https", "wss"}:
+        context = ssl.create_default_context(cafile=config.VERIFY_TLS if isinstance(config.VERIFY_TLS, str) else None)
+        if config.VERIFY_TLS is False:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
         options["ssl"] = context
-    async with websockets.connect(ws_url, subprotocols=cast(Any, [protocol]), additional_headers=extra_headers, **options) as websocket:
-        if protocol in ("graphql-ws", "graphql-transport-ws"):
-            return await _send_graphql_ws(websocket, payload, timeout)
-        else:
-            return await _send_subscriptions_transport_ws(websocket, payload, timeout)
+    async with _SameOriginConnect(ws_url, subprotocols=[Subprotocol(protocol)], additional_headers=headers or {}, **options) as websocket:
+        assert websocket.response is not None
+        observation.status_code = websocket.response.status_code
+        observation.headers = dict(websocket.response.headers)
+        return await _collect(websocket, payload, timeout, protocol, observation)
 
 
-def send_graphql_subscription(
-    url: str,
-    payload: dict,
-    timeout: float = config.SUBSCRIPTION_TIMEOUT,
-    protocol: str = config.SUBSCRIPTION_PROTOCOL,
-    headers: Optional[dict] = None,
-) -> list[dict]:
-    """Connect to a GraphQL WebSocket endpoint and collect subscription events.
+def send_graphql_subscription(url: str, payload: dict, timeout: float | None = None, protocol: str | None = None,
+                              headers: dict | None = None) -> list[dict]:
+    """Collect subscription events using live configuration and record the exchange.
 
-    Args:
-        url (str): The GraphQL endpoint URL (http:// or https:// will be converted to ws://)
-        payload (dict): GraphQL payload dict with "query" key (and optionally "variables")
-        timeout (float): Seconds to wait for events before returning
-        protocol (str): WebSocket sub-protocol to use
-        headers (dict, optional): Additional HTTP headers for the WebSocket handshake
-
-    Returns:
-        list[dict]: List of event payloads received within the timeout window
+    ``SubscriptionError`` preserves partial events when the connection, protocol,
+    or response limit fails. An acknowledged subscription may return no events.
     """
+    observation = _Observation()
+    store = active_store()
+    redactor = store.redactor if store else Redactor()
+    redactor.capture()
+    redactor.headers(headers or {})
+    redactor.remember_url(url)
+    started = time.monotonic()
+    error = None
     try:
-        return asyncio.run(_run_subscription(url, payload, timeout, protocol, headers))
+        return asyncio.run(_run_subscription(url, payload, config.SUBSCRIPTION_TIMEOUT if timeout is None else timeout,
+                                             config.SUBSCRIPTION_PROTOCOL if protocol is None else protocol, headers, observation))
     except Exception as exc:
-        logger.warning("Subscription to %s failed (%s: %s); returning empty event list.", url, type(exc).__name__, exc)
-        logger.debug("Subscription exception detail:", exc_info=True)
-        return []
+        error = redactor.text(f"{type(exc).__name__}: {exc}")
+        logger.warning("Subscription failed: %s", error)
+        raise SubscriptionError(error, observation.events, observation.status_code) from None
+    finally:
+        if store:
+            response = SimpleNamespace(status_code=observation.status_code, headers=observation.headers,
+                                       text=json.dumps({"messages": observation.messages}))
+            store.request(url, "WEBSOCKET", payload, response, time.monotonic() - started, error)

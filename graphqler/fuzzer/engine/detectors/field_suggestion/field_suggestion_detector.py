@@ -58,7 +58,7 @@ class FieldSuggestionsDetector(Detector):
                 evidence = self._get_evidence(graphql_response, request_response)
                 Stats().add_vulnerability(
                     self.DETECTION_NAME,
-                    self.name,
+                    self.node.qualified_name,
                     self.confirmed_vulnerable,
                     self.potentially_vulnerable,
                     payload=payload,
@@ -76,7 +76,7 @@ class FieldSuggestionsDetector(Detector):
         )
         Stats().add_vulnerability(
             self.DETECTION_NAME,
-            self.name,
+            self.node.qualified_name,
             False,
             False,
             payload="",

@@ -45,14 +45,14 @@ class IDORChainDetector:
                 )
                 stats.add_vulnerability(
                     "IDOR_CHAIN",
-                    step.node.name,
+                    step.node.qualified_name,
                     is_vulnerable=True,
                     potentially_vulnerable=True,
                     evidence=evidence,
                 )
                 detection_writer.write_from_chain(
                     vuln_name="IDOR_CHAIN",
-                    detected_node_name=step.node.name,
+                    detected_node_name=step.node.qualified_name,
                     chain=chain,
                     results=results,
                     detected_step_index=i,

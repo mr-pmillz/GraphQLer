@@ -41,7 +41,7 @@ def intialize_file_if_not_exists(file_path: Path):
     Args:
         file_path (Path): The path to the file
     """
-    _output_path(file_path)
+    file_path, _ = _output_path(file_path)
     if not file_path.exists():
         initialize_file(file_path)
 
@@ -53,8 +53,7 @@ def recreate_path(dir_path: Path):
         dir_path (Path): The directory path
     """
     # Convert the path to a Path object
-    path = Path(dir_path)
-    get_or_create_directory(path)
+    path = get_or_create_directory(dir_path)
 
     # Remove the directory if it exists
     shutil.rmtree(path, ignore_errors=True)
@@ -79,8 +78,7 @@ def get_or_create_directory(directory_path: str | Path) -> Path:
     absolute = Path(os.path.abspath(directory_path))
     store = active_store()
     root = store.directory if store else absolute.parent.resolve()
-    ensure_directory(absolute, root)
-    return directory_path
+    return ensure_directory(absolute, root)
 
 
 def get_or_create_file(file_path: Path) -> Path:
@@ -92,7 +90,7 @@ def get_or_create_file(file_path: Path) -> Path:
     Returns:
         Path: The file path
     """
-    _output_path(file_path)
+    file_path, _ = _output_path(file_path)
     if not file_path.exists():
         initialize_file(file_path)
     return file_path

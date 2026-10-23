@@ -125,7 +125,7 @@ def send_graphql_request_with_auth(url: str, payload: str | dict | list, auth_ov
     return send_graphql_request_with_headers(url, payload, {"Authorization": auth_override} if auth_override else {})
 
 
-def send_graphql_request_with_headers(url: str, payload: str | dict | list, headers: dict[str, str]) -> tuple[dict, requests.Response]:
+def send_graphql_request_with_headers(url: str, payload: str | dict | list, headers: dict[str, str], *, timeout: float | None = None) -> tuple[dict, requests.Response]:
     """Send a GraphQL request using a one-off session with an explicit headers dict.
 
     Inherits ordinary ``config.CUSTOM_HEADERS`` and overlays the provided *headers*.
@@ -136,6 +136,7 @@ def send_graphql_request_with_headers(url: str, payload: str | dict | list, head
         url (str): URL of the GraphQL server.
         payload (str | dict | list): GraphQL payload.
         headers (dict[str, str]): Headers to include (merged on top of CUSTOM_HEADERS).
+        timeout (float | None): Optional request budget, capped by REQUEST_TIMEOUT.
 
     Returns:
         tuple[dict, requests.Response]: Parsed GraphQL response dict, raw HTTP response.
@@ -149,11 +150,18 @@ def send_graphql_request_with_headers(url: str, payload: str | dict | list, head
 
     time_since_last_request = time.time() - last_request_time
     if time_since_last_request < config.TIME_BETWEEN_REQUESTS:
-        time.sleep(config.TIME_BETWEEN_REQUESTS - time_since_last_request)
+        delay = config.TIME_BETWEEN_REQUESTS - time_since_last_request
+        if timeout is not None:
+            if delay >= timeout:
+                raise TimeoutError("HTTP request time budget exhausted before rate-limit delay")
+            timeout -= delay
+        time.sleep(delay)
 
     one_off_session = _create_session_with_headers(headers)
     try:
-        response = _post(one_off_session, url, body)
+        if store := active_store():
+            store.redactor.headers(headers)
+        response = _post(one_off_session, url, body, timeout=timeout)
     finally:
         one_off_session.close()
     last_request_time = time.time()
@@ -161,11 +169,11 @@ def send_graphql_request_with_headers(url: str, payload: str | dict | list, head
     return parse_response(response.text), response
 
 
-def _post(client: requests.Session, url: str, body: Any) -> requests.Response:
+def _post(client: requests.Session, url: str, body: Any, *, timeout: float | None = None) -> requests.Response:
     """Bound and catalog every hop without forwarding credentials to another origin."""
     from graphqler.discovery import _origin, validate_url
     original = validate_url(url)
-    deadline = time.monotonic() + config.REQUEST_TIMEOUT
+    deadline = time.monotonic() + (min(config.REQUEST_TIMEOUT, timeout) if timeout is not None else config.REQUEST_TIMEOUT)
     for _ in range(4):
         started = time.monotonic()
         response = None

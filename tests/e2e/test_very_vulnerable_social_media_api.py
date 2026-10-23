@@ -115,9 +115,9 @@ class TestVeryVulnerableSocialMediaApi(GraphQLerIntegrationTestCase):
         vulns = self._run_and_get_vulns()
         uaf_vulns = vulns.get("UAF_CHAIN", {})
         self.assertTrue(len(uaf_vulns) > 0, "Expected at least one UAF_CHAIN entry")
-        # The detection must be tied to the specific 'getPost' node
-        found = any(node_name == "getPost" for node_name in uaf_vulns)
-        self.assertTrue(found, f"Expected UAF detection tied to 'getPost'. Got nodes: {list(uaf_vulns.keys())}")
+        # Include the root type so a mutation with the same name stays separate.
+        found = any(node_name == "Query|getPost" for node_name in uaf_vulns)
+        self.assertTrue(found, f"Expected UAF detection tied to 'Query|getPost'. Got nodes: {list(uaf_vulns.keys())}")
 
     def test_uaf_detection_files_written(self):
         """Each UAF detection should produce raw_log.txt and summary.txt."""

@@ -34,12 +34,23 @@ class Logger:
         self.detector_log_path = Path(config.OUTPUT_DIRECTORY) / Path(config.DETECTOR_LOG_FILE_PATH)
         self.idor_log_path = Path(config.OUTPUT_DIRECTORY) / Path(config.IDOR_LOG_FILE_PATH)
 
+    def _select_directory(self, directory: str | Path | None = None) -> None:
+        from graphqler.output import active_store
+        store = active_store()
+        directory = Path(directory if directory is not None else store.directory if store else config.OUTPUT_DIRECTORY)
+        for name in ("fuzzer", "compiler", "detector", "idor"):
+            path = directory / getattr(config, f"{name.upper()}_LOG_FILE_PATH")
+            if getattr(self, f"{name}_log_path") != path:
+                setattr(self, f"{name}_log_path", path)
+                setattr(self, f"{name}_logger", None)
+
     def get_fuzzer_logger(self) -> logging.Logger:
         """Gets the fuzzer logger. Creates the logger if it doesn't exist, and creates the log file if it doesn't exist
 
         Returns:
             logging.Logger: The fuzzer logger
         """
+        self._select_directory()
         # create the log file if it doesn't exist
         if not self.fuzzer_log_path.exists():
             get_or_create_directory(self.fuzzer_log_path.parent)
@@ -58,6 +69,7 @@ class Logger:
         Returns:
             logging.Logger: The detector logger
         """
+        self._select_directory()
         # create the log file if it doesn't exist
         if not self.detector_log_path.exists():
             get_or_create_directory(self.detector_log_path.parent)
@@ -70,12 +82,13 @@ class Logger:
         # return the logger
         return self.detector_logger
 
-    def get_compiler_logger(self) -> logging.Logger:
+    def get_compiler_logger(self, directory: str | Path | None = None) -> logging.Logger:
         """Gets the compiler logger. Creates the logger if it doesn't exist, and creates the log file if it doesn't exist
 
         Returns:
             logging.Logger: The compiler logger
         """
+        self._select_directory(directory)
         # create the log file if it doesn't exist
         if not self.compiler_log_path.exists():
             get_or_create_directory(self.compiler_log_path.parent)
@@ -94,6 +107,7 @@ class Logger:
         Returns:
             logging.Logger: The IDOR logger
         """
+        self._select_directory()
         # create the log file if it doesn't exist
         if not self.idor_log_path.exists():
             get_or_create_directory(self.idor_log_path.parent)
@@ -140,9 +154,16 @@ class Logger:
 
         # Avoid adding duplicate handlers when the same named logger is requested again
         resolved_path = str(Path(file_path).resolve())
-        for h in logger.handlers:
-            if isinstance(h, logging.FileHandler) and str(Path(h.baseFilename).resolve()) == resolved_path:
-                return logger
+        current_handler = False
+        for h in list(logger.handlers):
+            if isinstance(h, logging.FileHandler):
+                if str(Path(h.baseFilename).resolve()) == resolved_path:
+                    current_handler = True
+                else:
+                    h.close()
+                    logger.removeHandler(h)
+        if current_handler:
+            return logger
 
         formatter = logging.Formatter("[%(levelname)s][%(asctime)s][%(name)s]:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         handler = logging.FileHandler(file_path, mode="w", encoding="utf-8")

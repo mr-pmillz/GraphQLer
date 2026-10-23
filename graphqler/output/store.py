@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version
@@ -27,7 +28,7 @@ from .redaction import Redactor, SENSITIVE_NAME
 SCHEMA_VERSION = "graphqler/v1"
 DATABASE_VERSION = 1
 MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
-_active: ResultStore | None = None
+_active: ContextVar[ResultStore | None] = ContextVar("graphqler_active_store", default=None)
 _SENSITIVE_HEADER = SENSITIVE_NAME
 DETECTOR_SEVERITY = {
     "Introspection Enabled": "info",
@@ -100,18 +101,17 @@ def utc_now() -> str:
 
 def active_store() -> ResultStore | None:
     """Return the current execution's catalog, if recording is enabled."""
-    return _active
+    return _active.get()
 
 
 @contextmanager
 def recording(store: ResultStore) -> Generator[ResultStore]:
     """Bind a catalog for CLI, Python API, or worker execution."""
-    global _active
-    previous, _active = _active, store
+    token = _active.set(store)
     try:
         yield store
     finally:
-        _active = previous
+        _active.reset(token)
 
 
 @contextmanager
@@ -211,8 +211,8 @@ class ResultStore:
         """Commit or roll back a bounded transaction and always close its connection."""
         db = sqlite3.connect(self.path, timeout=30)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys = ON")
         try:
+            db.execute("PRAGMA foreign_keys = ON")
             with db:
                 yield db
         finally:
@@ -222,7 +222,7 @@ class ResultStore:
         """Remove configured credentials from evidence without removing target data by field name."""
         if not self._finalized:
             self.redactor.capture()
-        return self.redactor.text(value)
+        return self.redactor.text(value).encode("utf-8", errors="backslashreplace").decode("utf-8")
 
     def json(self, value: Any) -> str:
         """Serialize JSON after redacting string values (including escaped secrets)."""
@@ -233,7 +233,7 @@ class ResultStore:
     @staticmethod
     def encode(value: Any) -> str:
         """Encode already-scrubbed data without altering schema keys, enums, or IDs."""
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        return json.dumps(value, ensure_ascii=True, sort_keys=True, allow_nan=False)
 
     def set_target(self, target: str) -> None:
         """Select the discovered endpoint while retaining all discovery probes."""
@@ -285,10 +285,17 @@ class ResultStore:
         confidence = "confirmed" if confirmed else "low"
         payload_json = self.json(payload)
         with self.connect() as db:
-            result = db.execute(
-                "SELECT id FROM results WHERE run_id=? AND node=? AND payload_json=? ORDER BY id DESC LIMIT 1",
-                (self.run_id, self.clean(node), payload_json),
-            ).fetchone()
+            operation_type, separator, field = node.partition("|")
+            if separator and operation_type in {"Query", "Mutation", "Subscription"}:
+                result = db.execute(
+                    "SELECT id FROM results WHERE run_id=? AND node=? AND graphql_type=? AND payload_json=? ORDER BY id DESC LIMIT 1",
+                    (self.run_id, self.clean(field), operation_type, payload_json),
+                ).fetchone()
+            else:
+                result = db.execute(
+                    "SELECT id FROM results WHERE run_id=? AND node=? AND payload_json=? ORDER BY id DESC LIMIT 1",
+                    (self.run_id, self.clean(node), payload_json),
+                ).fetchone()
             db.execute(
                 """INSERT INTO findings (run_id,detector,node,status,severity,confidence,payload_json,evidence,result_id,observed_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,detector,node) DO UPDATE SET
@@ -350,7 +357,7 @@ class ResultStore:
                 while chunk := source.read(1024 * 1024):
                     digest.update(chunk)
                 source.seek(0)
-                lookahead = max((len(value.encode("utf-8")) for value in self.redactor.secrets), default=0)
+                lookahead = max((len(value.encode("utf-8", errors="surrogatepass")) for value in self.redactor.secrets), default=0)
                 content = source.read(MAX_ARTIFACT_BYTES + lookahead)
             media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
             is_text = media_type.startswith("text/") or path.suffix.lower() in {".json", ".yaml", ".yml", ".log", ".md", ".txt", ".csv", ".svg"}
@@ -360,11 +367,15 @@ class ResultStore:
             content = content[:MAX_ARTIFACT_BYTES]
             if is_text:
                 content = content.decode("utf-8", errors="ignore").encode("utf-8")
+            catalog_name = self.clean(name)
+            if catalog_name != name:
+                path_hash = hashlib.sha256(name.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
+                catalog_name = f"redacted/{path_hash}/{catalog_name}"
             with self.connect() as db:
                 db.execute(
                     """INSERT OR REPLACE INTO artifacts (run_id,path,role,media_type,sha256,size_bytes,stored_bytes,truncated,content)
                     VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (self.run_id, name, "input" if unchanged else "output", media_type, digest.hexdigest(), fingerprint[1],
+                    (self.run_id, catalog_name, "input" if unchanged else "output", media_type, digest.hexdigest(), fingerprint[1],
                      len(content), truncated, content),
                 )
 

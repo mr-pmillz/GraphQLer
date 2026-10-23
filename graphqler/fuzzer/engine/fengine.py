@@ -4,6 +4,7 @@ Note: The run_regular_mutation and run_regular_query functions are very similar,
 """
 
 import bdb
+import json
 import traceback
 
 from graphqler import config
@@ -121,25 +122,39 @@ class FEngine(object):
         Returns:
             tuple[list[dict], Result]: List of event payloads received and a Result
         """
-        from graphqler.utils.websocket_utils import send_graphql_subscription
+        from graphqler.utils.websocket_utils import SubscriptionError, send_graphql_subscription
+        from graphqler.output.redaction import Redactor
 
+        result = Result(ResultEnum.EXTERNAL_FAILURE)
         try:
             materializer = SubscriptionMaterializer(self.api, fail_on_hard_dependency_not_met=False)
             payload_str, _used_objects = materializer.get_payload(name, objects_bucket, "Subscription")
             graphql_payload = {"query": payload_str}
+            result.payload = graphql_payload
             request_utils = plugins_handler.get_request_utils()
             events = send_graphql_subscription(
                 url=self.api.url,
                 payload=graphql_payload,
                 headers=request_utils.get_headers(),
             )
-            if events:
-                return events, Result(ResultEnum.GENERAL_SUCCESS)
-            else:
-                return [], Result(ResultEnum.EXTERNAL_FAILURE)
+            result.status_code = 101
+            result.graphql_response = {"events": events}
+            result.raw_response_text = json.dumps(events)
+            result.errors = [error for event in events for error in (event.get("errors") or [])]
+            if not result.errors:
+                result.result_enum = ResultEnum.GENERAL_SUCCESS
+            return events, result
         except Exception as e:
-            self.logger.warning(f"Subscription {name} failed: {e}")
-            return [], Result(ResultEnum.EXTERNAL_FAILURE)
+            redactor = Redactor()
+            redactor.capture()
+            error = redactor.text(str(e))
+            self.logger.warning("Subscription %s failed: %s", name, error)
+            events = e.events if isinstance(e, SubscriptionError) else []
+            result.status_code = e.status_code if isinstance(e, SubscriptionError) else None
+            result.graphql_response = {"events": events}
+            result.raw_response_text = json.dumps(events)
+            result.errors = [error]
+            return events, result
 
     def __run_payload(self, name: str, objects_bucket: ObjectsBucket, materializer: Materializer, graphql_type: str) -> tuple[dict, Result]:
         """Runs the payload (either Query or Mutation), and returns a new objects bucket
@@ -187,7 +202,7 @@ class FEngine(object):
             payload_string, _ = materializer.get_payload(name, objects_bucket, graphql_type)
             result.payload = payload_string
             self.logger.info(f"[{profile.name}/{name}] Sending payload with profile '{profile.name}':\n {payload_string}")
-            
+
             # Use full profile headers (Authorization + any extra profile-specific headers)
             graphql_response, request_response = _request_utils.send_graphql_request_with_headers(self.api.url, payload_string, profile.get_headers())
             result.status_code = request_response.status_code

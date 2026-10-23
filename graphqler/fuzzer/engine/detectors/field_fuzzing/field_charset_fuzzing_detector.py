@@ -4,7 +4,7 @@ Explanation:
   iterates every character in a configurable charset over String input fields
   and flags the node as potentially vulnerable to blind data extraction when the
   response length varies significantly between characters.
-  
+
   This is like time-based blind SQLi but with response length as the oracle instead of time.
 
 Detection logic
@@ -120,7 +120,7 @@ class FieldCharsetFuzzingDetector(Detector):
         )
         Stats().add_vulnerability(
             self.DETECTION_NAME,
-            self.name,
+            self.node.qualified_name,
             self.confirmed_vulnerable,
             self.potentially_vulnerable,
             payload=last_payload,
