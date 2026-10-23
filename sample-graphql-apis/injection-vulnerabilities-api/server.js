@@ -1,3 +1,4 @@
+const { expressMiddleware } = require("@as-integrations/express5");
 /**
  * injection-vulnerabilities-api
  *
@@ -10,7 +11,7 @@
  * DO NOT deploy this outside of a local test environment.
  */
 
-const { ApolloServer } = require("apollo-server-express");
+const { ApolloServer } = require("@apollo/server");
 const express = require("express");
 const sqlite3 = require("sqlite3");
 const { v4: uuidv4 } = require("uuid");
@@ -164,7 +165,7 @@ async function startServer() {
   });
 
   await server.start();
-  server.applyMiddleware({ app });
+  app.use("/graphql", express.json(), expressMiddleware(server));
 
   app.listen(PORT, () => {
     console.log(`> injection-vulnerabilities-api ready at http://localhost:${PORT}/graphql`);

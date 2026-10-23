@@ -34,6 +34,13 @@ A `dict` with:
 | `stats` | `Stats` | Fuzzing statistics and vulnerabilities |
 | `api` | `API` | Parsed schema: `queries`, `mutations`, `objects`, `input_objects`, `enums`, `unions`, `interfaces` |
 | `results` | `dict` | `{ endpoint: set[Result] }` |
+| `database` | `str` | Path to the durable SQLite result catalog |
+| `run_id` | `str` | Identity of this pipeline invocation |
+
+The complete Python pipeline shares one run, including schema compilation and chain
+generation. Standalone compiler/fuzzer methods also create catalogs. To group
+several lower-level calls into one run, wrap them in
+`graphqler.output.scan_run(path, url, "run")`. See [output contracts](output.md).
 
 !!! note
 

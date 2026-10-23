@@ -1,9 +1,10 @@
 # Modes
 
-GraphQLer's work is split into two phases, **compilation** and **fuzzing**, selected with `--mode`.
+GraphQLer supports discovery, compilation, and fuzzing, selected with `--mode`.
 
 | Mode | Needs `--url` | What it does |
 |---|:-:|---|
+| [`discover`](#discover) | yes, or `--input` | Probe common GraphQL endpoints without fuzzing |
 | [`compile`](#compile) | yes | Introspection → parsing → dependency resolution → dependency graph → chains |
 | [`compile-graph`](#compile-graph) | yes | Compilation without chain generation |
 | [`compile-chains`](#compile-chains) | no | (Re-)generate chains from an already compiled graph |
@@ -11,6 +12,26 @@ GraphQLer's work is split into two phases, **compilation** and **fuzzing**, sele
 | [`run`](#run) | yes | `compile` then `fuzz` |
 | [`idor`](#idor) | yes | Re-run only the IDOR chains |
 | [`single`](#single) | yes | Run one query or mutation |
+
+## Discover
+
+```sh
+uv run graphqler --mode discover --url https://example.com/ --output discovery
+uv run graphqler --mode run --url https://example.com/ --output results
+```
+
+Discovery tests the exact URL and common paths such as `/graphql`, `/graphql/v1`,
+`/graphql/v2`, `/v1/graphql`, and `/api/graphql`. A URL path prefix is also searched.
+Use `--discovery-wordlist paths.txt` for custom paths. Responses must contain the
+requested GraphQL alias or a specific structured validation error; a 200 status or
+generic JSON error alone is insufficient. Both POST and GET endpoints are reported.
+
+`run`, `compile`, and `compile-graph` automatically discover from origin URLs. Use
+`--discover` for a base path such as `/app`, or `--no-discovery` to use the exact URL.
+Scanning selects the first confirmed POST endpoint; discovery mode reports all
+matches. GET-only endpoints remain discovery results because the fuzzer uses POST.
+Redirects stay on the target origin. Discovery is bounded to 256 candidates, 1 MiB
+per response, three redirects, and the configured request/total timeouts.
 
 ## Compile
 

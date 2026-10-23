@@ -1,31 +1,15 @@
-# Use a base image with Python 3.12 installed
-FROM python:3.12
+FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM python:3.12.15-trixie@sha256:0d0db5b17f11b1b7d1aafa74ceadaa64ba0944b267ff6fc22008a197acd6b9ad
 
-# Install uv
-## The installer requires curl (and certificates) to download the release archive
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-
-## Download the latest installer
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
-
-## Run the installer then remove it
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-
-## Ensure the installed binary is on the `PATH`
-ENV PATH="/root/.local/bin/:$PATH"
-
-# Install graphqler
-# Set the working directory inside the container
+COPY --from=uv /uv /usr/local/bin/uv
+LABEL org.opencontainers.image.source="https://github.com/mr-pmillz/GraphQLer"
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
-
-# Copy the uv.lock and pyproject.toml files to the working directory
-COPY uv.lock pyproject.toml ./
-
-# Copy the rest of the application code to the working directory
-COPY . .
-
-# Install project dependencies using Poetry
-RUN uv sync
-
-# Use ENTRYPOINT to make the script receive arguments
-ENTRYPOINT ["uv", "run", "python", "-m", "graphqler"]
+COPY pyproject.toml uv.lock build-constraints.txt README.md LICENSE ./
+COPY graphqler ./graphqler
+RUN uv build --wheel --build-constraints build-constraints.txt --require-hashes \
+    && uv sync --locked --no-dev --no-install-project --extra mcp \
+    && uv pip install --no-deps dist/*.whl
+ENV PATH="/app/.venv/bin:$PATH"
+WORKDIR /work
+ENTRYPOINT ["/app/.venv/bin/graphqler"]

@@ -1,36 +1,35 @@
 name: Unit Tests
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+env:
+  TZ: UTC
+
 jobs:
   build:
     name: Run GraphQLer Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
-
-    - name: Setup timezone
-      uses: zcong1993/setup-timezone@master
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        timezone: UTC
+        persist-credentials: false
 
     - name: Set up Python 3.12
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
-        python-version: 3.12
+        python-version: '3.12.15'
 
-    - name: Install the latest version of uv
-      uses: astral-sh/setup-uv@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        version: "0.13.5"
 
     - name: Install Python dependencies
-      run: uv sync --extra mcp
-
-    - name: Install OS packages
-      run: |
-        if [ -s packages.list ]; then
-          sudo apt install -y $(grep -o ^[^#][[:alnum:]-]* packages.list)
-        fi
+      run: uv sync --locked --extra mcp
 
     - name: Test with pytest
       run: |
-        uv run pytest tests/unit/ --exitfirst --verbose --failed-first --cov=. --cov-report html
+        uv run --locked --extra mcp pytest tests/unit/ --exitfirst --verbose --failed-first --cov=. --cov-report html

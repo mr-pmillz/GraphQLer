@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-pytest.importorskip("fastmcp", reason="MCP extras not installed (pip install GraphQLer[mcp])")
+pytest.importorskip("fastmcp", reason="MCP extras not installed (uv sync --locked --extra mcp)")
 
 
 # ---------------------------------------------------------------------------

@@ -7,33 +7,37 @@
 5. Clean up
 """
 
+from __future__ import annotations
+
 import logging
 import multiprocessing
+import queue as queue_module
 import sys
 import threading
 import time
-
 import typing
+from contextlib import nullcontext
 from pathlib import Path
 
 from graphqler import config
 from graphqler.chains import Chain, ChainGenerator, ChainStep
 from graphqler.graph import GraphGenerator, Node
+from graphqler.output import active_store, cataloged, recording
 from graphqler.utils.api import API
 from graphqler.utils.logging_utils import Logger
 from graphqler.utils.objects_bucket import ObjectsBucket
 from graphqler.utils.stats import Stats
 
-from .engine.fengine import FEngine
 from .engine.dengine import DEngine
+from .engine.detectors import IDORChainDetector, UAFChainDetector
+from .engine.fengine import FEngine
 from .engine.types import Result, ResultEnum
 from .engine.types.profile import RuntimeProfile
-from .engine.detectors import IDORChainDetector, UAFChainDetector
 from .reporters import LLMReporter
 
 
-class Fuzzer(object):
-    def __init__(self, save_path: str, url: str, objects_bucket: typing.Optional[ObjectsBucket] = None):
+class Fuzzer:
+    def __init__(self, save_path: str, url: str, objects_bucket: ObjectsBucket | None = None):
         """Initializes the fuzzer, reading information from the compiled files
 
         Args:
@@ -41,6 +45,7 @@ class Fuzzer(object):
             url (str): URL for graphql introspection query to hit
         """
         self.save_path = save_path
+        self.output_store = active_store()
         self.url = url
         self.logger = Logger().get_fuzzer_logger()
         self.stats = Stats()
@@ -91,34 +96,69 @@ class Fuzzer(object):
 
         # Optional TUI callbacks — None by default so CLI mode has zero overhead.
         # Set these before calling run() / run_chain() when using the TUI.
-        self.on_chain_start: typing.Optional[typing.Callable[[Chain], None]] = None
-        self.on_chain_done: typing.Optional[typing.Callable[[Chain, list], None]] = None
+        self.on_chain_start: typing.Callable[[Chain], None] | None = None
+        self.on_chain_done: typing.Callable[[Chain, list], None] | None = None
 
         # Nodes that failed due to unmet hard dependencies during chain execution;
         # re-run as standalone in the dep_retry phase after islands.
         self._dep_blocked_nodes: set[Node] = set()
 
+    @cataloged("fuzz")
     def run(self):
         """Main function to run the fuzzer"""
+        self._run_worker(self.__run_fuzz)
+
+    def _worker_entry(self, target, queue):
+        """Bind output in spawned processes and report completion or a bounded error."""
+        with recording(self.output_store) if self.output_store else nullcontext():
+            try:
+                target(queue)
+            except BaseException as exc:
+                queue.put((False, f"{type(exc).__name__}: {exc}"[:2000]))
+            else:
+                queue.put((True, ""))
+
+    def _run_worker(self, target):
+        """Wait for execution, join terminated processes, and propagate failures to the caller."""
+        self.output_store = active_store()
         queue = multiprocessing.Queue()
         if config.DEBUG:
-            p = threading.Thread(target=self.__run_fuzz, args=(queue,))
+            p = threading.Thread(target=self._worker_entry, args=(target, queue))
             p.daemon = True
         else:
-            p = multiprocessing.Process(target=self.__run_fuzz, args=(queue,))
+            p = multiprocessing.Process(target=self._worker_entry, args=(target, queue))
         p.start()
-        p.join(config.MAX_TIME)
-
-        if p.is_alive():
-            if isinstance(p, multiprocessing.Process):
-                print(f"(+) Terminating the fuzzer process - reached max time {config.MAX_TIME}s")
+        try:
+            # Debugging runs in a thread so breakpoints work; never finalize results
+            # while a thread can still mutate them.
+            p.join(None if config.DEBUG else config.MAX_TIME)
+            if p.is_alive():
+                assert isinstance(p, multiprocessing.Process)
                 p.terminate()
-            else:
-                print(f"(+) Fuzzer thread still running after {config.MAX_TIME}s (threads cannot be forcibly terminated)")
+                p.join(5)
+                if p.is_alive():
+                    p.kill()
+                    p.join()
+                raise TimeoutError(f"Fuzzer exceeded MAX_TIME ({config.MAX_TIME}s); partial results retained")
+            if isinstance(p, multiprocessing.Process) and p.exitcode != 0:
+                raise RuntimeError(f"Fuzzer worker exited with status {p.exitcode}")
+            try:
+                success, error = queue.get(timeout=2)
+            except queue_module.Empty as exc:
+                raise RuntimeError("Fuzzer worker exited without a completion report") from exc
+            if not success:
+                raise RuntimeError(error)
+        finally:
+            if isinstance(p, multiprocessing.Process) and p.is_alive():
+                p.terminate()
+                p.join(5)
+                if p.is_alive():
+                    p.kill()
+                    p.join()
+            queue.close()
+            queue.join_thread()
 
-        if not queue.empty():
-            _ = queue.get()
-
+    @cataloged("chain")
     def run_chain(self, chain: Chain) -> None:
         """Execute a single chain (public API for use by the TUI chain explorer).
 
@@ -127,6 +167,7 @@ class Fuzzer(object):
         """
         self.__run_chain(chain)
 
+    @cataloged("single")
     def run_single(self, node_name: str):
         """Runs a single node
 
@@ -137,7 +178,7 @@ class Fuzzer(object):
         if len(node) == 0:
             print(f"(F) Node `{node_name}` not found")
             self.logger.error(f"Node `{node_name}` not found")
-            return
+            raise ValueError(f"Node `{node_name}` not found")
 
         self.stats.start_time = time.time()
         self.__run_nodes(node)
@@ -147,30 +188,14 @@ class Fuzzer(object):
         self.stats.save_eval_summary()
         self.objects_bucket.save()
 
+    @cataloged("idor")
     def run_idor_only(self):
         """Run only the IDOR chain phase, skipping regular fuzzing.
 
         Useful when a full fuzz run has already been done and you only want
         to re-exercise the IDOR chains (e.g., against a fresh API state).
         """
-        queue = multiprocessing.Queue()
-        if config.DEBUG:
-            p = threading.Thread(target=self.__run_idor_steps, args=(queue,))
-            p.daemon = True
-        else:
-            p = multiprocessing.Process(target=self.__run_idor_steps, args=(queue,))
-        p.start()
-        p.join(config.MAX_TIME)
-
-        if p.is_alive():
-            if isinstance(p, multiprocessing.Process):
-                print(f"(+) Terminating the fuzzer process - reached max time {config.MAX_TIME}s")
-                p.terminate()
-            else:
-                print(f"(+) Fuzzer thread still running after {config.MAX_TIME}s (threads cannot be forcibly terminated)")
-
-        if not queue.empty():
-            _ = queue.get()
+        self._run_worker(self.__run_idor_steps)
 
     def __run_idor_steps(self, queue: multiprocessing.Queue):
         """Run only IDOR chains (no regular fuzzing, no island nodes, no API-level detections)."""
@@ -330,7 +355,7 @@ class Fuzzer(object):
         bucket_cls = typing.cast(typing.Any, getattr(ObjectsBucket, "__wrapped__", ObjectsBucket))
         fresh_bucket: ObjectsBucket = bucket_cls(self.api)
         results: list[tuple[ChainStep, Result]] = []
-        pre_delete_snapshot: typing.Optional[ObjectsBucket] = None
+        pre_delete_snapshot: ObjectsBucket | None = None
 
         # Index of the last primary step — fuzz/detect runs only on this step so that
         # inner primary nodes (setup steps) don't multiply API calls.  Inner-only nodes
@@ -406,7 +431,7 @@ class Fuzzer(object):
                         snapshot_objects = {} if pre_delete_snapshot is None else dict(pre_delete_snapshot.objects)
                         print(f"[UAF-DEBUG] post_delete step: node={node.name}")
                         print(f"[UAF-DEBUG]   snapshot non-empty: {not snapshot_empty}  objects={snapshot_objects}")
-                        print(f"[UAF-DEBUG]   token: {repr(profile.auth_token)}")
+                        print(f"[UAF-DEBUG]   token: {profile.auth_token!r}")
 
                     self.logger.info(f"[post_delete][test] Running node with post-delete profile: {node}")
                     _response, result = self.fengine.run_minimal_payload_with_profile(
@@ -459,6 +484,9 @@ class Fuzzer(object):
             if self.on_chain_done:
                 self.on_chain_done(chain, results)
         finally:
+            # Each chain still starts empty; retain its observations for the final
+            # report and the subsequent island/dependency-retry phase.
+            self.objects_bucket.merge(fresh_bucket)
             # Always remove the per-chain handler so the FD is released and logs
             # don't bleed into subsequent chains even if an exception occurred.
             self.logger.info(f"=== Chain end: {chain_path_str} ===")
@@ -486,7 +514,7 @@ class Fuzzer(object):
             self.__detect_vulnerabilities_on_node(node, self.objects_bucket)
             self.stats.islands_completed += 1
 
-    def __evaluate(self, node: Node, visit_path: list[Node], objects_bucket: typing.Optional[ObjectsBucket] = None) -> tuple[list[list[Node]], Result]:
+    def __evaluate(self, node: Node, visit_path: list[Node], objects_bucket: ObjectsBucket | None = None) -> tuple[list[list[Node]], Result]:
         """Evaluates the node
 
         Args:
@@ -516,7 +544,7 @@ class Fuzzer(object):
         else:
             raise Exception(f"Unknown GraphQL type: {node.graphql_type}")
 
-    def __fuzz(self, node: Node, visit_path: list[Node], objects_bucket: typing.Optional[ObjectsBucket] = None):
+    def __fuzz(self, node: Node, visit_path: list[Node], objects_bucket: ObjectsBucket | None = None):
         """Fuzzes the node
 
         Args:

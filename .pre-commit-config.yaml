@@ -1,13 +1,11 @@
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v2.3.0
+  rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
   hooks:
-  -   id: check-yaml
-  -   id: end-of-file-fixer
-  -   id: trailing-whitespace
+  - id: check-yaml
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  # Ruff version.
-  rev: v0.7.3
+  rev: f368fb366ff7f2f808dd324b83a6d32267799e19 # v0.17.2
   hooks:
-    # Run the linter.
-    - id: ruff
+  - id: ruff-check

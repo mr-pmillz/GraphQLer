@@ -12,3 +12,16 @@ __pycache__
 .git
 .gitignore
 .DS_Store
+graphqler-output
+ci-test-*
+*.sqlite3
+*.sqlite3-*
+*.log
+.env.*
+.agents
+.codex
+dist
+site
+sample-graphql-apis
+tests
+benchmark

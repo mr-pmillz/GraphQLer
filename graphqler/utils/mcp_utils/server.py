@@ -22,7 +22,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "The 'mcp' package is required to run the GraphQLer MCP server. "
-        "Install it with:  pip install GraphQLer[mcp]"
+        "Install from this checkout with: uv sync --locked --extra mcp"
     ) from exc
 
 from graphqler import config
@@ -92,6 +92,8 @@ def _set_output_directory(path: str) -> None:
 
 def _apply_auth(auth: str | None) -> None:
     """Apply an auth token to the global config, clearing any previous value when absent."""
+    from graphqler.utils.request_utils import reset_session
+    reset_session()
     if auth:
         from graphqler.utils.cli_utils import set_auth_token_constant
 

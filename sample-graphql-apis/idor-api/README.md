@@ -14,7 +14,7 @@ Or manually:
 
 ```bash
 cd sample-graphql-apis/idor-api
-uv sync
+uv sync --locked
 uv run python app.py
 ```
 

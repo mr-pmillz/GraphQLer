@@ -72,7 +72,8 @@ class Detector(ABC):
         # Send the GraphQL request
         graphql_response, request_response = plugins_handler.get_request_utils().send_graphql_request(self.api.url, self.payload)
         result = Result(
-            result_enum=ResultEnum.GENERAL_SUCCESS,
+            result_enum=(ResultEnum.GENERAL_SUCCESS if request_response.status_code == 200 and
+                         isinstance(graphql_response, dict) and not graphql_response.get("errors") else ResultEnum.EXTERNAL_FAILURE),
             payload=self.payload,
             status_code=request_response.status_code,
             graphql_response=graphql_response,

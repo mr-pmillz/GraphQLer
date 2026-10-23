@@ -1,29 +1,30 @@
 import json
-import cloudpickle as pickle
+import os
 import pprint
+import re
 import shutil
 import sys
 import time
 from pathlib import Path
 from typing import Self
 
-from graphqler import config
-from graphqler.fuzzer.engine.types import Result
-from graphqler.graph import Node
-from graphqler.fuzzer.engine.types import ResultEnum
+import cloudpickle as pickle
 
-from .file_utils import initialize_file, intialize_file_if_not_exists, recreate_path, get_or_create_file
+from graphqler import config
+from graphqler.fuzzer.engine.types import Result, ResultEnum
+from graphqler.graph import Node
+from graphqler.output import active_store
+
+from .file_utils import get_or_create_file, initialize_file, intialize_file_if_not_exists, recreate_path
 from .singleton import singleton
-import os
-import re
 
 
 @singleton
 class Stats :
     ### PUT THE STATS YOU WANT HERE
-    file_path = "/tmp/stats.txt"  # This gets overriden by the set_file_path function
-    endpoint_results_dir = "/tmp/endpoint_results"
-    unique_responses_file_path = "/tmp/unique_responses.txt"
+    file_path = Path("/tmp/stats.txt")  # Overridden by set_file_paths.
+    endpoint_results_dir = Path("/tmp/endpoint_results")
+    unique_responses_file_path = Path("/tmp/unique_responses.txt")
     start_time: float = 0.0
     http_status_codes: dict[str, dict[str, int]] = {}
     successful_nodes: dict[str, int] = {}
@@ -138,6 +139,7 @@ class Stats :
         Args:
             working_dir (str): _description_
         """
+        self.pickle_save_path = Path(working_dir) / config.SERIALIZED_DIR_NAME / config.STATS_PICKLE_FILE_NAME
         # Do the stats file first
         initialize_file(Path(working_dir) / config.STATS_FILE_NAME)
         self.file_path = Path(working_dir) / config.STATS_FILE_NAME
@@ -209,7 +211,7 @@ class Stats :
         node_name: str,
         is_vulnerable: bool,
         potentially_vulnerable: bool = False,
-        payload: str = "",
+        payload: str | dict | list | None = "",
         evidence: str = "",
     ):
         """Record a vulnerability finding.  Once a node is confirmed vulnerable it stays confirmed.
@@ -243,6 +245,8 @@ class Stats :
                 "payload": payload,
                 "evidence": evidence,
             }
+        if store := active_store():
+            store.finding(vulnerability_name, node_name, is_vulnerable, potentially_vulnerable, payload, evidence)
 
     def get_formatted_vulnerabilites(self) -> str:
         """Returns the formatted vulnerabilities
@@ -307,6 +311,9 @@ class Stats :
         if result.result_enum == ResultEnum.HARD_DEPENDENCY_NOT_MET:
             return
 
+        if store := active_store():
+            store.result(node, result)
+
         result_status = result.success
 
         # Update success / fail stats first
@@ -323,7 +330,8 @@ class Stats :
 
         # Update unique responses
         if str(result.graphql_response) in self.unique_responses:
-            self.unique_responses[str(result.graphql_response)].append(node.name)
+            if node.name not in self.unique_responses[str(result.graphql_response)]:
+                self.unique_responses[str(result.graphql_response)].append(node.name)
         else:
             self.unique_responses[str(result.graphql_response)] = [node.name]
 
@@ -382,7 +390,7 @@ class Stats :
             f.write("\n===================Failed Nodes===================\n")
             f.write(json.dumps(self.failed_nodes, indent=4))
             f.write("\n===================General stats ===================\n")
-            f.write(f"\nTime taken: {str(time.time() - self.start_time)} seconds")
+            f.write(f"\nTime taken: {time.time() - self.start_time!s} seconds")
             # Operation coverage: operations with >=1 success (HTTP 200, no GraphQL 'errors' field)
             f.write(f"\nOperation coverage (successful):  {covered}/{total} ({coverage_frac * 100:.1f}%)")
             # Kept for backward compatibility with test utilities
@@ -431,6 +439,8 @@ class Stats :
         }
         with open(json_path, "w") as f:
             json.dump(report, f, indent=4)
+        if store := active_store():
+            store.summary(report)
 
     def save_eval_summary(self):
         """Saves an ablation/evaluation summary to the ``eval/`` directory.
@@ -535,8 +545,8 @@ class Stats :
         # Write the unique results to the file
         for result_file_path, payloads in unique_results.items():
             intialize_file_if_not_exists(result_file_path)
-            for payload, response in payloads.items():
-                with open(result_file_path, "a") as f:
+            with open(result_file_path, "w") as f:
+                for payload, response in payloads.items():
                     f.write("------------------Payload:-------------------\n")
                     f.write(f"{payload}\n")
                     f.write("------------------Response:-------------------\n")

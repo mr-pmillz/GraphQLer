@@ -5,7 +5,7 @@ allowing AI assistants to drive GraphQL API security testing directly.
 
 Install the optional MCP dependency before using:
 
-    pip install GraphQLer[mcp]
+    uv sync --locked --extra mcp
 
 Launch the MCP server (stdio transport, compatible with Claude Desktop, Cursor, etc.):
 

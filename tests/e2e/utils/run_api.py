@@ -21,7 +21,7 @@ def run_node_project(path: str, commands: list[str], port: str) -> subprocess.Po
     env["PORT"] = port
     shell_flag = os.name == "nt"  # True no Windows, False no Linux/macOS
 
-    # Run npm install with proper handling
+    # Run npm ci with proper handling
     npm_cmd = shutil.which("npm")
     node_cmd = shutil.which("node")
     if npm_cmd is None:
@@ -30,9 +30,9 @@ def run_node_project(path: str, commands: list[str], port: str) -> subprocess.Po
         raise RuntimeError("node command not found. Please ensure Node.js is installed.")
     
     try:
-        subprocess.run([npm_cmd, "install"], cwd=path, check=True, env=env, shell=shell_flag)
+        subprocess.run([npm_cmd, "ci"], cwd=path, check=True, env=env, shell=shell_flag)
     except subprocess.CalledProcessError as e:
-        print(f"npm install failed: {e}")
+        print(f"npm ci failed: {e}")
         raise
 
     # Run each command in the list
@@ -65,10 +65,10 @@ def run_python_project(path: str, port: str) -> subprocess.Popen:
     if uv_cmd is None:
         raise RuntimeError("uv command not found. Please ensure uv is installed.")
 
-    subprocess.run([uv_cmd, "sync", "-q"], cwd=path, check=True, env=env)
+    subprocess.run([uv_cmd, "sync", "--locked", "-q"], cwd=path, check=True, env=env)
 
     process = subprocess.Popen(
-        [uv_cmd, "run", "python", "app.py"],
+        [uv_cmd, "run", "--locked", "python", "app.py"],
         cwd=path,
         env=env,
     )
@@ -91,10 +91,10 @@ def wait_for_server(url, timeout=30):
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=min(2, timeout))
             if response.status_code:  # any HTTP response means the server is up
                 return True
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.RequestException:
             pass
         time.sleep(1)
     return False

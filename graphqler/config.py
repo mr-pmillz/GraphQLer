@@ -4,7 +4,8 @@
 DEBUG: bool = False
 
 """For proxy"""
-PROXY: str | None = None  # Don't use this, this will be overriten by argparse
+PROXY: str | None = None  # HTTP proxy for both HTTP and HTTPS targets; --proxy overrides it.
+VERIFY_TLS: bool = True
 
 """For any authentication tokens"""
 AUTHORIZATION: str | None = None  # Don't use this, this will be overriten by argparse
@@ -103,7 +104,7 @@ DISABLE_MUTATIONS: bool = False  # When True, only Query chains are generated â€
 """For fuzzing"""
 ALLOW_DELETION_OF_OBJECTS: bool = False  # This mode is for when we want to allow the deletion of objects from the objects bucket when coming across a DELETE mutation success
 MAX_FUZZING_ITERATIONS: int = 1  # Number of complete sweeps through all chains; increase for more coverage depth
-MAX_TIME: int = 3600  # in seconds
+MAX_TIME: float = 3600  # in seconds
 SKIP_MAXIMAL_PAYLOADS: bool = False  # This mode is for when we want to skip the maximal payloads
 SKIP_DOS_ATTACKS: bool = True  # This mode is for when we want to skip the DoS check
 SKIP_INJECTION_ATTACKS: bool = False  # This mode is for when we want to skip the injection check
@@ -118,22 +119,22 @@ NOSQLI_EXTRACTION_CHARSET: str = "0123456789abcdef-"  # Charset to iterate durin
 NOSQLI_MAX_EXTRACTION_LENGTH: int = 64  # Maximum number of characters to extract before stopping
 
 """For time-based SQL blind injection"""
-TIME_BASED_SQL_SLEEP_SECONDS = 3  # Seconds to sleep in time-based SQL payloads (pg_sleep / SLEEP / WAITFOR)
-TIME_BASED_SQL_THRESHOLD_RATIO = 0.8  # Response time >= sleep * ratio is treated as confirmed time-based SQLi
+TIME_BASED_SQL_SLEEP_SECONDS: int = 3  # Seconds to sleep in time-based SQL payloads (pg_sleep / SLEEP / WAITFOR)
+TIME_BASED_SQL_THRESHOLD_RATIO: float = 0.8  # Response time >= sleep * ratio is treated as confirmed time-based SQLi
 
 """For field charset fuzzing and ID enumeration (GraphQLMap GRAPHQL_CHARSET / GRAPHQL_INCREMENT equivalent)"""
 SKIP_ENUMERATION_ATTACKS: bool = True  # Disabled by default (sends many requests per node â€” opt-in)
 # Charset used for field-level enumeration fuzzing (printable ASCII minus obvious injection chars)
 FIELD_CHARSET: str = "0123456789abcdefghijklmnopqrstuvwxyz"
 MAX_CHARSET_FUZZ_FIELDS: int = 3  # Max string fields to fuzz per node
-FIELD_RESPONSE_LENGTH_VARIANCE_THRESHOLD = 0.5  # Flag if (max-min)/avg response length exceeds this ratio (raised from 0.2 to reduce FPs; paired with near-empty fraction check in detector)
+FIELD_RESPONSE_LENGTH_VARIANCE_THRESHOLD: float = 0.5  # Flag if (max-min)/avg response length exceeds this ratio (raised from 0.2 to reduce FPs; paired with near-empty fraction check in detector)
 # ID / integer enumeration (IDOR detection)
 ID_ENUMERATION_COUNT: int = 10  # Number of integer IDs to probe (1 .. N)
-ID_ENUMERATION_SUCCESS_THRESHOLD = 2  # Min distinct IDs that must return data to flag IDOR
+ID_ENUMERATION_SUCCESS_THRESHOLD: int = 2  # Min distinct IDs that must return data to flag IDOR
 ID_ENUMERATION_SCOPE_HEURISTIC: bool = True  # Classify endpoint scope (private/public) before running enumeration; skip public endpoints to avoid false positives
 
 """For each request"""
-REQUEST_TIMEOUT: int = 120  # in seconds
+REQUEST_TIMEOUT: float = 120  # in seconds
 TIME_BETWEEN_REQUESTS: float = 0.001  # in seconds
 
 """For custom skipping nodes"""

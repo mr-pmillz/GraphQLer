@@ -25,7 +25,7 @@ def _get_litellm():
         return litellm
     except ImportError as exc:
         raise ImportError(
-            "litellm is required for LLM features. Install it with: uv add litellm"
+            "litellm is required for LLM features. Restore pinned dependencies with: uv sync --locked"
         ) from exc
 
 

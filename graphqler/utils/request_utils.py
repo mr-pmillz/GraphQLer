@@ -1,12 +1,14 @@
-from urllib3.exceptions import InsecureRequestWarning
-from urllib3 import disable_warnings
-from typing import Callable
-from graphqler import config
-
-import time
-import requests
 import json
+import time
+from collections.abc import Callable
+from typing import Any
 
+import requests
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
+
+from graphqler import config
+from graphqler.output import active_store
 
 # The last time a request was made so that we can wait between requests
 last_request_time = time.time()
@@ -16,6 +18,8 @@ session = None
 def reset_session() -> None:
     """Reset the cached HTTP session so new config/auth headers take effect."""
     global session, last_request_time
+    if session is not None:
+        session.close()
     session = None
     last_request_time = time.time()
 
@@ -43,11 +47,7 @@ def get_proxies() -> dict:
     Returns:
         dict: The proxies for the request
     """
-    if config.PROXY and "http:" in config.PROXY:
-        return {"http": config.PROXY}
-    elif config.PROXY and "https:" in config.PROXY:
-        return {"https": config.PROXY}
-    elif config.PROXY:
+    if config.PROXY:
         return {"http": config.PROXY, "https": config.PROXY}
     else:
         return {}
@@ -80,11 +80,7 @@ def send_graphql_request(url: str, payload: str | dict | list, next: Callable[[d
 
     # Make the request and set the last request time
     session = get_or_create_session()
-    response = session.post(
-        url=url,
-        json=body,
-        timeout=config.REQUEST_TIMEOUT,
-    )
+    response = _post(session, url, body)
     last_request_time = time.time()
 
     if response.status_code != 200:
@@ -143,12 +139,27 @@ def send_graphql_request_with_headers(url: str, payload: str | dict | list, head
 
     one_off_session = _create_session_with_headers(headers)
     try:
-        response = one_off_session.post(url=url, json=body, timeout=config.REQUEST_TIMEOUT)
+        response = _post(one_off_session, url, body)
     finally:
         one_off_session.close()
     last_request_time = time.time()
 
     return parse_response(response.text), response
+
+
+def _post(client: requests.Session, url: str, body: Any) -> requests.Response:
+    """Send and record one request, including transport failures."""
+    started = time.monotonic()
+    store = active_store()
+    try:
+        response = client.post(url=url, json=body, timeout=config.REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        if store:
+            store.request(url, "POST", body, elapsed=time.monotonic() - started, error=str(exc))
+        raise
+    if store:
+        store.request(url, "POST", body, response, time.monotonic() - started)
+    return response
 
 
 def parse_response(response_text: str) -> dict:
@@ -191,12 +202,13 @@ def create_new_session() -> requests.Session:
     """
     session = requests.Session()
     session.headers.update(get_headers())
+    session.verify = config.VERIFY_TLS
 
     # Set proxy if available
     if config.PROXY:
         session.proxies.update(get_proxies())
+    if not config.VERIFY_TLS:
         disable_warnings(InsecureRequestWarning)
-        session.verify = False
     return session
 
 
@@ -221,11 +233,12 @@ def _create_session_with_headers(extra_headers: dict[str, str]) -> requests.Sess
         if value:
             headers[key] = value
     one_off.headers.update(headers)
+    one_off.verify = config.VERIFY_TLS
 
     if config.PROXY:
         one_off.proxies.update(get_proxies())
+    if not config.VERIFY_TLS:
         disable_warnings(InsecureRequestWarning)
-        one_off.verify = False
     return one_off
 
 

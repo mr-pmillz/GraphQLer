@@ -1,0 +1,122 @@
+"""Input validation, isolated target execution, and automation exit codes."""
+
+import copy
+import hashlib
+import math
+from pathlib import Path
+import sys
+import tempfile
+import uuid
+
+from graphqler import config
+from graphqler.discovery import validate_url
+from graphqler.output.reports import batch_report, parse_formats
+from graphqler.utils.config_handler import parse_config
+from graphqler.utils.request_utils import reset_session
+
+
+def collect_targets(args: dict) -> list[str]:
+    """Read, validate, and deduplicate inputs before making any requests."""
+    inputs = args.get("url") or []
+    inputs = [inputs] if isinstance(inputs, str) else list(inputs)
+    if args.get("input"):
+        with Path(args["input"]).open(encoding="utf-8-sig") as source:
+            for line in source:
+                if len(line) > 8192:
+                    raise ValueError("Input target line exceeds 8192 characters")
+                if line.strip() and not line.lstrip().startswith("#"):
+                    inputs.append(line.strip())
+                if len(inputs) > 10000:
+                    raise ValueError("Input file exceeds 10000 targets")
+    targets = []
+    for group in inputs:
+        for value in group.split(","):
+            if value.strip():
+                target = validate_url(value.strip())
+                if target not in targets:
+                    targets.append(target)
+                if len(targets) > 10000:
+                    raise ValueError("Input exceeds 10000 targets")
+    if args.get("mode") == "compile-chains" and not targets:
+        return [""]
+    if not targets:
+        raise ValueError("Provide --url or --input")
+    return targets
+
+
+def result_exit(stores: list, threshold: str | None = None) -> int:
+    """Keep scan failures distinct from the optional finding threshold."""
+    statuses = [store.run_info()["status"] for store in stores]
+    completed = statuses.count("completed")
+    if completed and completed < len(statuses):
+        return 3
+    if not completed:
+        return 124 if statuses and all(status == "timed_out" for status in statuses) else 1
+    if threshold:
+        severities = ["info", "low", "medium", "high", "critical"]
+        minimum = severities.index(threshold)
+        for store in stores:
+            with store.connect() as db:
+                if any(severities.index(row[0]) >= minimum for row in db.execute(
+                    "SELECT severity FROM findings WHERE run_id=? AND status='confirmed'", (store.run_id,)
+                )):
+                    return 4
+    return 0
+
+
+def run_batch(args: dict, run_target) -> int:
+    """Execute a sequential batch with one shared database and isolated target artifacts."""
+    try:
+        targets = collect_targets(args)
+        provenance = bool(args.get("customer_id") and args.get("job_id"))
+        if bool(args.get("customer_id")) != bool(args.get("job_id")):
+            raise ValueError("--customer-id and --job-id must be supplied together")
+        if provenance and (not args["customer_id"].strip() or not args["job_id"].strip()):
+            raise ValueError("Provenance identifiers must not be blank")
+        formats = parse_formats(args.get("format"), provenance)
+        if args.get("mode") not in {"discover", "compile", "compile-graph", "compile-chains", "run", "fuzz", "single", "idor"}:
+            raise ValueError("Provide a valid --mode")
+        if args.get("mode") == "single" and not args.get("node"):
+            raise ValueError("--node is required in single mode")
+        for option in ("request_timeout", "max_time", "discovery_timeout", "discovery_max_time"):
+            if args.get(option) is not None and (args[option] <= 0 or not math.isfinite(args[option])):
+                raise ValueError(f"--{option.replace('_', '-')} must be finite and positive")
+        for header in args.get("header") or []:
+            if ":" not in header or not header.split(":", 1)[0].strip() or "\n" in header or "\r" in header:
+                raise ValueError("--header must be a single Name: value header")
+        if args.get("config"):
+            parse_config(args["config"])
+    except (ValueError, OSError) as exc:
+        print(f"(E) {exc}", file=sys.stderr)
+        return 2
+    directory = Path(args.get("path") or config.OUTPUT_DIRECTORY).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    baseline = {key: copy.deepcopy(value) for key, value in vars(config).items() if key.isupper()}
+    stores = []
+    batch_id = str(uuid.uuid4())
+    with tempfile.TemporaryDirectory(prefix="graphqler-results-") as scratch:
+        database = directory / "results.sqlite3" if "sqlite" in formats else Path(scratch) / "results.sqlite3"
+        try:
+            for index, target in enumerate(targets, 1):
+                for key, value in baseline.items():
+                    setattr(config, key, copy.deepcopy(value))
+                path = directory if len(targets) == 1 else directory / "targets" / hashlib.sha256(target.encode()).hexdigest()[:16]
+                options = {**args, "url": target, "path": str(path), "_database": database, "_formats": formats, "_output_root": directory}
+                if len(targets) > 1:
+                    print(f"(B) Target {index}/{len(targets)}: {target}")
+                try:
+                    stores.append(run_target(options))
+                except KeyboardInterrupt as exc:
+                    if interrupted := getattr(exc, "result_store", None):
+                        stores.append(interrupted)
+                    raise
+            return result_exit(stores, args.get("fail_on_findings"))
+        finally:
+            try:
+                if len(targets) > 1 and stores:
+                    report = batch_report(directory, stores, batch_id, formats, targets)
+                    print(f"(RESULTS): {report['succeeded']} target(s) completed; {report['failed']} failed. Manifest: {directory / 'manifest.json'}")
+            finally:
+                for key, value in baseline.items():
+                    setattr(config, key, value)
+                reset_session()

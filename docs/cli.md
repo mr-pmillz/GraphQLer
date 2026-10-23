@@ -16,13 +16,33 @@ Special invocations:
 
 | Flag | Description |
 |---|---|
-| `--mode {compile,compile-graph,compile-chains,fuzz,idor,run,single}` | **Required.** See [Modes](modes.md). |
-| `--url URL` | GraphQL endpoint. Required for all modes except `compile-chains`. |
-| `--path PATH` | Output directory. Default: `graphqler-output`. |
+| `--mode {discover,compile,compile-graph,compile-chains,fuzz,idor,run,single}` | **Required.** See [Modes](modes.md). |
+| `--url URL`, `-u URL` | Target URL, comma-separated URLs, or repeated flags. Origin URLs trigger discovery before compilation. |
+| `--input FILE`, `-i FILE`, `--targets-file FILE` | Target file, one URL per line; blank lines and `#` comments ignored. |
+| `--output PATH`, `-o PATH`, `--path PATH` | Output directory. Default: `graphqler-output`. |
+| `--format FORMATS`, `-f FORMATS` | Comma-separated/repeated `sqlite,jsonl,markdown,universal,all`. Default: `sqlite,jsonl,markdown`. |
+| `--customer-id ID`, `--job-id ID` | Caller-supplied provenance for universal output; provide both. |
+| `--fail-on-findings [SEVERITY]` | Exit 4 for confirmed findings at or above `info` (default), `low`, `medium`, `high`, or `critical`. |
 | `--config CONFIG` | TOML configuration file. If omitted, `<PATH>/config.toml` is used when present, otherwise generated. |
 | `--node NODE` | Query/mutation to run in `single` mode. |
 | `--plugins-path PLUGINS_PATH` | Directory containing [plugins](plugins.md). |
-| `--proxy PROXY` | HTTP proxy, e.g. `http://127.0.0.1:8080`. TLS verification is disabled when a proxy is set. |
+| `--proxy PROXY` | HTTP/HTTPS proxy, e.g. `http://127.0.0.1:8080`; applied to HTTP and HTTPS targets. |
+| `--insecure` | Explicitly disable TLS certificate verification. |
+| `--header HEADER`, `-H HEADER` | Repeat custom headers as `Name: value`; applies to discovery and scanning. |
+| `--request-timeout SECONDS` | Per-request HTTP timeout. |
+| `--max-time SECONDS` | Fuzzing time budget per target; partial evidence is retained on timeout. |
+
+## Discovery
+
+| Flag | Description |
+|---|---|
+| `--discover` | Discover a POST endpoint before scanning, including when the supplied URL has a path prefix. |
+| `--no-discovery` | Use the exact supplied URL, even an origin URL. |
+| `--discovery-wordlist FILE` | Custom endpoint paths in place of built-in candidates. |
+| `--discovery-timeout SECONDS` | Timeout per discovery request; default 5 seconds. |
+| `--discovery-max-time SECONDS` | Total discovery budget per target; default 60 seconds. |
+
+See [output contracts and exit codes](output.md) for batch and findings-gate semantics.
 
 ## Authentication
 
@@ -70,7 +90,7 @@ See [LLM features](llm.md).
 
 | Flag | Description |
 |---|---|
-| `--mcp` | Launch the MCP server (requires `pip install "GraphQLer[mcp]"`). |
+| `--mcp` | Launch the MCP server (requires `uv sync --locked --extra mcp`). |
 | `--mcp-transport TRANSPORT` | `stdio` (default), `sse`, `streamable-http` or `http`. |
 
 ## Precedence

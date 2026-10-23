@@ -1,4 +1,4 @@
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 _T = TypeVar("_T")
 
@@ -24,5 +24,11 @@ class _SingletonCallable(Generic[_T]):
         self._instances.pop(self.__wrapped__, None)
 
 
-def singleton(myClass: type[_T]) -> _SingletonCallable[_T]:
-    return _SingletonCallable(myClass)
+if TYPE_CHECKING:
+    def singleton(myClass: type[_T]) -> type[_T]:
+        """Preserve the decorated class's instance type in annotations."""
+        return myClass
+else:
+    def singleton(myClass: type[_T]) -> _SingletonCallable[_T]:
+        """Wrap construction with a resettable instance cache at runtime."""
+        return _SingletonCallable(myClass)

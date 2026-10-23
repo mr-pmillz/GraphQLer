@@ -1,7 +1,10 @@
+import os
+import json
+import shutil
+import tomllib
+
 from graphqler import config
 from graphqler.utils.file_utils import get_graphqler_root
-import tomllib
-import os
 
 
 def write_config_to_toml(path: str) -> None:
@@ -40,21 +43,24 @@ def write_config_to_toml(path: str) -> None:
             # Emit a proper TOML inline array; strings are quoted and escaped
             def _toml_item(item) -> str:
                 if isinstance(item, str):
-                    return '"' + item.replace("\\", "\\\\").replace('"', '\\"') + '"'
+                    return json.dumps(item, ensure_ascii=False)
+                if isinstance(item, bool):
+                    return str(item).lower()
                 return str(item)
             items = ", ".join(_toml_item(item) for item in value)
             lines.append(f"{key} = [{items}]\n")
         elif value is None:
             lines.append(f'{key} = ""\n')
         else:
-            escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-            lines.append(f'{key} = "{escaped}"\n')
+            lines.append(f'{key} = {json.dumps(str(value), ensure_ascii=False)}\n')
 
     lines.append("\n[CUSTOM_HEADERS]\n")
+    from graphqler.output.store import _SENSITIVE_HEADER
     headers: dict = getattr(config, "CUSTOM_HEADERS", None) or template.get("CUSTOM_HEADERS", {})
     for k, v in headers.items():
-        ev = str(v).replace("\\", "\\\\").replace('"', '\\"')
-        lines.append(f'{k} = "{ev}"\n')
+        if _SENSITIVE_HEADER.search(k):
+            continue
+        lines.append(f'{json.dumps(k, ensure_ascii=False)} = {json.dumps(str(v), ensure_ascii=False)}\n')
 
     with open(path, "w") as fh:
         fh.writelines(lines)
@@ -74,8 +80,7 @@ def parse_config(config_obj: str | dict) -> dict:
             config = tomllib.load(f)
 
     if len(config.keys()) == 0:
-        print(f"(!) No items in config {config_obj}")
-        exit(1)
+        raise ValueError("Configuration must contain at least one setting")
 
     return config
 
@@ -103,7 +108,7 @@ def generate_new_config(config_file_to_write: str) -> None:
     """
     # copy from the base path of the graphqler package
     project_root = get_graphqler_root()
-    os.system(f"cp {project_root}/examples/config.toml {config_file_to_write}")
+    shutil.copyfile(project_root / "examples" / "config.toml", config_file_to_write)
 
 
 def does_config_file_exist_in_path(path: str) -> bool:

@@ -5,6 +5,18 @@ from graphqler.utils.singleton import singleton
 from graphqler.utils.file_utils import initialize_file
 
 
+def reset_loggers() -> None:
+    """Close previous scan file handlers while preserving TUI/embedding handlers."""
+    for name in list(logging.Logger.manager.loggerDict):
+        if name in {"fuzzer", "compiler", "detector", "idor"} or name.startswith("fuzzer.chain."):
+            logger = logging.getLogger(name)
+            for handler in list(logger.handlers):
+                if isinstance(handler, logging.FileHandler):
+                    handler.close()
+                    logger.removeHandler(handler)
+    getattr(Logger, "reset")()
+
+
 @singleton
 class Logger:
     fuzzer_logger = None
@@ -132,7 +144,7 @@ class Logger:
                 return logger
 
         formatter = logging.Formatter("[%(levelname)s][%(asctime)s][%(name)s]:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-        handler = logging.FileHandler(file_path)
+        handler = logging.FileHandler(file_path, mode="w", encoding="utf-8")
         handler.setFormatter(formatter)
 
         if config.DEBUG:

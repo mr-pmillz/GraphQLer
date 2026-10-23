@@ -1,3 +1,4 @@
+const { expressMiddleware } = require("@as-integrations/express5");
 /**
  * nosql-time-sql-api
  *
@@ -8,7 +9,7 @@
  * DO NOT deploy this outside of a local test environment.
  */
 
-const { ApolloServer } = require("apollo-server-express");
+const { ApolloServer } = require("@apollo/server");
 const express = require("express");
 
 const PORT = process.env.PORT || 4005;
@@ -170,7 +171,7 @@ async function startServer() {
   });
 
   await server.start();
-  server.applyMiddleware({ app });
+  app.use("/graphql", express.json(), expressMiddleware(server));
 
   app.listen(PORT, () => {
     console.log(`> nosql-time-sql-api ready at http://localhost:${PORT}/graphql`);

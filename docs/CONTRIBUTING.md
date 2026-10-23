@@ -45,7 +45,7 @@ To run end-to-end tests, you will have to first set up the sample APIs by runnin
 
 ```sh
 cd sample-graphql-apis/food-delivery-api
-npm install
+npm ci
 node dbinitializer.js
 node server.js
 ```

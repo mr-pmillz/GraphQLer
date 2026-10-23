@@ -1,3 +1,4 @@
+const { expressMiddleware } = require("@as-integrations/express5");
 /**
  * api-security-api
  *
@@ -13,7 +14,7 @@
  * DO NOT deploy this outside of a local test environment.
  */
 
-const { ApolloServer } = require("apollo-server-express");
+const { ApolloServer } = require("@apollo/server");
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 
@@ -131,7 +132,7 @@ async function startServer() {
   const server = new ApolloServer({
     typeDefs,
     resolvers,
-    // Introspection and field suggestions are ON by default in Apollo Server 3.
+    // Introspection and field suggestions are ON by default in Apollo Server 5.
     // Leaving them at default ensures IntrospectionDetector and
     // FieldSuggestionsDetector can flag this API.
     introspection: true,
@@ -139,7 +140,7 @@ async function startServer() {
   });
 
   await server.start();
-  server.applyMiddleware({ app });
+  app.use("/graphql", express.json(), expressMiddleware(server));
 
   app.listen(PORT, () => {
     console.log(`> api-security-api ready at http://localhost:${PORT}/graphql`);

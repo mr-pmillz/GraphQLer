@@ -61,6 +61,20 @@ def _build_bucket(connection_fields=None):
     return bucket
 
 
+def test_chain_observations_merge_without_sharing_mutable_state():
+    """Completed chain values survive in reports while later chain mutations stay isolated."""
+    aggregate, chain = _build_bucket(), _build_bucket()
+    chain.put_object_in_bucket("Country", {"id": "1", "details": {"name": "France"}})
+    chain.put_scalar_in_bucket("id", "ID", "1")
+    aggregate.merge(chain)
+    aggregate.merge(chain)
+    chain.objects["Country"][0]["details"]["name"] = "changed"
+    chain.clear_bucket()
+    assert aggregate.objects == {"Country": [{"id": "1", "details": {"name": "France"}}]}
+    assert aggregate.scalars["id"]["values"] == {"1"}
+    assert _build_bucket().is_empty()
+
+
 class TestUnpackConnectionWrapper:
     def test_items_list_unpacked_into_country(self):
         """Inner Country items from an `items` list field are stored under 'Country'."""

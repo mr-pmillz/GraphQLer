@@ -1,6 +1,6 @@
 # Vulnerability detection
 
-During fuzzing, detectors send targeted payloads to each query and mutation — using real object IDs from the objects bucket — and inspect the responses. Every finding is recorded in `stats.txt`/`stats.json` and written to `detections/` (see [Output files](output.md#detections)).
+During fuzzing, detectors send targeted payloads to each query and mutation, using real object IDs from the objects bucket, and inspect the responses. Positive findings are recorded in SQLite, JSONL, and Markdown by default, alongside legacy statistics and detection logs (see [Output files](output.md)).
 
 Findings are reported as either **vulnerable** (confirmed by the response) or **potentially vulnerable** (suspicious, worth manual review).
 
@@ -32,6 +32,11 @@ Enabled unless `SKIP_MISC_ATTACKS = true`.
 | DoS: Resource Exhaustion | No upper bound on pagination-like inputs (`first`, `limit`, `count`, …) |
 
 Additional DoS payloads (aliasing, batching, deep recursion) are **skipped by default**; set `SKIP_DOS_ATTACKS = false` to send them. Only do so against services you can afford to take down.
+
+Rejection messages for fragment cycles, query depth, complexity, and rate limits
+are treated as protective behavior. A 5xx response or timeout alone is potential
+evidence; explicit resource-exhaustion errors are needed for a confirmed DoS
+finding. Text echoed in GraphQL `data` is not used as error evidence.
 
 ### Enumeration
 

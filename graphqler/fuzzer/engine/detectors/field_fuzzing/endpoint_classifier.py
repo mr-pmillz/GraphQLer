@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Literal, cast
+from typing import Literal
 
 from graphqler import config
 from graphqler.utils import llm_utils
@@ -177,7 +177,7 @@ def _llm_classify(
         data = llm_utils.call_llm(_ENDPOINT_SYSTEM_PROMPT, user_prompt)
         scope = str(data.get("scope", "")).lower()
         if scope in ("private", "public"):
-            return cast(Literal["private", "public"], scope)
+            return scope
         logger.warning("LLM returned unexpected scope value: %r", scope)
         return "unknown"
     except ImportError:

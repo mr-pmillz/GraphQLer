@@ -1,88 +1,68 @@
 # Installation
 
-!!! info "Prerequisites"
+This fork targets Python 3.12 and publishes from `mr-pmillz/GraphQLer`.
 
-    - **Python 3.12** (GraphQLer requires `>=3.12,<3.13`)
-    - **Windows users** need Microsoft C++ Build Tools (VC 14 or newer) — get them from the [Microsoft page](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+## From source
 
-## User setup
-
-=== "pip"
-
-    GraphQLer is published on [PyPI](https://pypi.org/project/GraphQLer/):
-
-    ```sh
-    pip install GraphQLer
-    python -m graphqler --help
-    ```
-
-    To use the [MCP server](mcp.md), install the optional extras:
-
-    ```sh
-    pip install "GraphQLer[mcp]"
-    ```
-
-=== "Docker"
-
-    Images are published to [Docker Hub](https://hub.docker.com/r/omar2535/graphqler) and the GitHub Container Registry (`ghcr.io/omar2535/graphqler`):
-
-    ```sh
-    docker pull omar2535/graphqler:latest
-    docker run --rm omar2535/graphqler --help
-    ```
-
-    The container's entrypoint is `python -m graphqler` with working directory `/app`. Mount a volume to keep the output directory:
-
-    ```sh
-    docker run --rm -v "$PWD/graphqler-output:/app/graphqler-output" \
-      omar2535/graphqler --mode run --url https://example.com/graphql
-    ```
-
-## Developer setup
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first.
-
-### 1. Install OS-specific dependencies
-
-On Ubuntu:
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 
 ```sh
-sudo apt-get install build-essential
+git clone https://github.com/mr-pmillz/GraphQLer.git
+cd GraphQLer
+uv sync --locked --extra mcp
+uv run graphqler --help
 ```
 
-### 2. Set up the environment
+`uv.lock` contains exact versions and artifact hashes. The optional `mcp` extra
+adds the MCP server. The upstream PyPI package is maintained separately; install
+this checkout or a wheel from this fork's GitHub Releases to use these features.
+
+## GitHub Releases
+
+Once a `v<project.version>` tag is pushed, CI tests the code, builds the GHCR image,
+and publishes a wheel, source archive, hashed `requirements.txt`, and `SHA256SUMS` to the fork's GitHub
+Releases. Verify the checksums before installing a downloaded wheel:
 
 ```sh
-uv sync --extra mcp
-source .venv/bin/activate
+sha256sum --check SHA256SUMS
+pip install --require-hashes -r requirements.txt
+pip install --no-deps ./graphqler-2.4.0-py3-none-any.whl
 ```
 
-### 3. Run GraphQLer
+The release dependency export includes the optional MCP dependencies. Use a
+Python 3.12 virtual environment for installation.
+
+## Docker
+
+Images publish to `ghcr.io/mr-pmillz/graphqler`, with commit-SHA and release-version
+tags. Use a registry digest when you need immutable deployment inputs:
 
 ```sh
-uv run python -m graphqler --version
+# Replace DIGEST with the SHA-256 digest from the published image.
+docker run --rm -v "$PWD/results:/work/results" \
+  ghcr.io/mr-pmillz/graphqler@sha256:DIGEST \
+  --mode run --url https://example.com/ --output /work/results
 ```
 
-### 4. Install pre-commit hooks (optional)
+The entry point is the installed `graphqler` command; the working directory is
+`/work`. It starts directly without resolving or downloading packages. Mount your
+output directory to preserve results. `--proxy` works for both HTTP and HTTPS;
+use `--insecure` only if you intentionally bypass certificate verification.
+
+## Development and verification
 
 ```sh
-pre-commit install
+uv run --locked --extra mcp pytest tests/unit/
+uv run --locked --extra mcp pytest tests/integration/
+uv run --locked --extra mcp pytest tests/e2e/ -n 4 --dist loadfile
+uv run --locked ruff check .
+uv run --locked --extra mcp ty check
+uv build --build-constraints build-constraints.txt --require-hashes
+uv run --locked --only-group docs zensical build --clean
 ```
 
-### 5. Run tests
+Integration/end-to-end tests use local sample APIs and require Node 24. The
+fixtures install with `npm ci` and `uv sync --locked`; no target credentials are
+needed. See [Contributing](CONTRIBUTING.md).
 
-```sh
-uv run pytest tests/unit/          # unit tests
-uv run pytest tests/integration/   # integration tests
-uv run pytest tests/e2e/           # end-to-end tests
-```
-
-The end-to-end tests need the sample APIs in `sample-graphql-apis/` — see [Contributing](CONTRIBUTING.md#running-tests).
-
-### 6. Preview the documentation (optional)
-
-This site is built with [Zensical](https://zensical.org/):
-
-```sh
-uv run --only-group docs zensical serve
-```
+To install the pinned pre-commit hooks, run `uv run pre-commit install`.

@@ -4,6 +4,10 @@ from graphqler.utils.config_handler import set_config
 from graphqler.utils.stats import Stats
 from graphqler.utils.objects_bucket import ObjectsBucket
 from graphqler.utils.api import API
+from graphqler import config
+from graphqler.graph import GraphGenerator
+from graphqler.output import scan_run
+from graphqler.utils.logging_utils import reset_loggers
 
 
 def compile_and_fuzz(path: str, url: str, input_config: dict | None = None) -> dict:
@@ -34,24 +38,30 @@ def compile_and_fuzz(path: str, url: str, input_config: dict | None = None) -> d
     """
     if input_config:
         set_config(input_config)
+    config.OUTPUT_DIRECTORY = path
+    getattr(Stats, "reset")()
+    getattr(ObjectsBucket, "reset")()
+    reset_loggers()
+    with scan_run(path, url, "run") as store:
+        compiler = Compiler(path, url)
+        compiler.run()
+        graph_generator = GraphGenerator(path)
+        graph_generator.get_dependency_graph()
+        graph_generator.draw_dependency_graph()
+        compiler.run_chain_generation_and_save()
 
-    compiler = Compiler(path, url)
-    compiler.run()
-
-    stats = Stats()
-    stats.set_file_paths(path)
-
-    fuzzer = Fuzzer(path, url)
-    fuzzer.run()
-
-    api: API = fuzzer.api
-
-    objects_bucket = ObjectsBucket(api=api).load()
-    stats = Stats().load()
-
-    return {
-        'objects_bucket': objects_bucket,
-        'stats': stats,
-        'api': fuzzer.api,
-        'results': stats.results
-    }
+        stats = Stats()
+        stats.set_file_paths(path)
+        fuzzer = Fuzzer(path, url)
+        fuzzer.run()
+        api: API = fuzzer.api
+        objects_bucket = ObjectsBucket(api=api).load()
+        stats = Stats().load()
+        return {
+            'objects_bucket': objects_bucket,
+            'stats': stats,
+            'api': fuzzer.api,
+            'results': stats.results,
+            'database': str(store.path),
+            'run_id': store.run_id,
+        }

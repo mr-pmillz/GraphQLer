@@ -1,12 +1,12 @@
 [project]
 site_name = "GraphQLer"
-site_url = "https://omar2535.github.io/GraphQLer/"
+site_url = "https://mr-pmillz.github.io/GraphQLer/"
 site_description = "The dependency-aware GraphQL API security testing tool"
 site_author = "Omar Tsai"
 copyright = "Copyright &copy; Omar Tsai &mdash; MIT License"
 
-repo_url = "https://github.com/omar2535/GraphQLer"
-repo_name = "omar2535/GraphQLer"
+repo_url = "https://github.com/mr-pmillz/GraphQLer"
+repo_name = "mr-pmillz/GraphQLer"
 edit_uri = "edit/main/docs/"
 
 docs_dir = "docs"
@@ -41,6 +41,7 @@ nav = [
   { "Development" = [
     { "Architecture" = "architecture.md" },
     { "Contributing" = "CONTRIBUTING.md" },
+    { "Dependency maintenance" = "dependencies.md" },
   ] },
 ]
 
@@ -95,15 +96,15 @@ toggle.name = "Switch to system preference"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
-link = "https://github.com/omar2535/GraphQLer"
+link = "https://github.com/mr-pmillz/GraphQLer"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/python"
-link = "https://pypi.org/project/GraphQLer/"
+link = "https://github.com/mr-pmillz/GraphQLer/releases"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/docker"
-link = "https://hub.docker.com/r/omar2535/graphqler"
+link = "https://github.com/mr-pmillz/GraphQLer/pkgs/container/graphqler"
 
 [project.markdown_extensions]
 abbr = {}

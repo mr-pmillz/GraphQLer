@@ -13,8 +13,10 @@ GraphQLer reads a TOML file passed with `--config`. Without it, `<PATH>/config.t
 | `USE_DEPENDENCY_GRAPH` | Order requests using the dependency graph | Boolean | `true` |
 | `ALLOW_DELETION_OF_OBJECTS` | Remove objects from the bucket after a successful DELETE | Boolean | `false` |
 | `MAX_FUZZING_ITERATIONS` | Number of sweeps through all chains | Integer | `1` |
-| `MAX_TIME` | Maximum run time in seconds | Integer | `3600` |
-| `REQUEST_TIMEOUT` | Per-request timeout in seconds | Integer | `120` |
+| `MAX_TIME` | Fuzzing worker time budget per target; disabled in thread-based debug mode | Number | `3600` |
+| `REQUEST_TIMEOUT` | Per-request timeout in seconds | Number | `120` |
+| `PROXY` | HTTP proxy used for HTTP and HTTPS targets; `--proxy` overrides it | String | unset |
+| `VERIFY_TLS` | Verify server certificates; `--insecure` disables verification | Boolean | `true` |
 | `TIME_BETWEEN_REQUESTS` | Minimum delay between requests in seconds | Float | `0.001` |
 | `DEBUG` | Debug mode | Boolean | `false` |
 | `SKIP_MAXIMAL_PAYLOADS` | Skip payloads that request every possible output field | Boolean | `false` |
@@ -35,6 +37,10 @@ GraphQLer reads a TOML file passed with `--config`. Without it, `<PATH>/config.t
 LLM settings are described in [LLM features](llm.md).
 
 ## Custom headers
+
+CLI headers can be repeated with `--header 'Name: value'`. Authentication tokens,
+API keys, and cookies are omitted when GraphQLer saves its resolved configuration.
+Supply them again when resuming a scan.
 
 ```toml
 [CUSTOM_HEADERS]

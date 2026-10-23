@@ -1,50 +1,61 @@
 [project]
 name = "GraphQLer"
-version = "2.3.8"
+version = "2.4.0"
 description = "A cutting edge context aware GraphQL API fuzzing tool!"
 authors = [{ name = "Omar2535", email = "omar@9tsai.ca" }]
+maintainers = [{ name = "mr-pmillz" }]
 requires-python = ">=3.12,<3.13"
 readme = "README.md"
 license = "MIT"
 dependencies = [
-    "requests>=2.32.5",
-    "urllib3>=2.6.3",
-    "graphql-core>=3.2.8",
-    "pyyaml>=6.0.3",
-    "levenshtein>=0.27.3",
-    "clairvoyance>=2.5.5",
-    "cloudpickle>=3.1.2,<4",
-    "matplotlib>=3.8.0",
-    "networkx>=3.6.1",
-    "litellm>=1.67.0",
-    "websockets>=14.0",
-    "textual>=6.0.0,<8.0.0",
+    "requests==2.34.2",
+    "urllib3==2.8.0",
+    "graphql-core==3.3.0",
+    "pyyaml==6.0.3",
+    "levenshtein==0.27.5",
+    "clairvoyance==2.5.5",
+    "cloudpickle==3.1.2",
+    "matplotlib==3.11.2",
+    "networkx==3.7",
+    "litellm==1.106.2",
+    "websockets==17.3",
+    # Newer Textual requires Rich >=14; clairvoyance still requires Rich <14.
+    "textual==6.2.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/mr-pmillz/GraphQLer"
+Issues = "https://github.com/mr-pmillz/GraphQLer/issues"
+Documentation = "https://mr-pmillz.github.io/GraphQLer/"
+
 [project.optional-dependencies]
-mcp = ["mcp>=1.0.0", "fastmcp>=3.1.1"]
+mcp = ["mcp==2.3.0", "fastmcp==4.1.3"]
 
 [project.scripts]
+graphqler = "graphqler.__main__:cli"
 graphqler-mcp = "graphqler.utils.mcp_utils.server:serve"
 
 [tool.ruff]
 line-length = 180
 
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [dependency-groups]
 dev = [
-    "autopep8>=2.3.2",
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-mock",
-    "pytest-xdist>=3.0.0",
-    "flake8>=7.3.0",
-    "pre-commit>=4.5.1",
-    "ruff>=0.15.7",
-    "lark>=1.3.1",
-    "ty>=0.0.25",
+    "autopep8==2.3.2",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "pytest-mock==3.17.0",
+    "pytest-xdist==3.8.0",
+    "flake8==7.4.1",
+    "pre-commit==4.7.0",
+    "ruff==0.17.2",
+    "lark==1.3.1",
+    "ty==0.0.91",
 ]
 docs = [
-    "zensical>=0.0.65",
+    "zensical==0.0.71",
 ]
 
 [tool.ty.src]
@@ -54,5 +65,5 @@ exclude = ["sample-graphql-apis/"]
 package = true
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"

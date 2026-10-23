@@ -398,6 +398,15 @@ class ObjectsBucket:
             self.put_object_in_bucket(operation_output_type, data)
 
     # ------------------- HELPERS -------------------
+    def merge(self, other: "ObjectsBucket") -> None:
+        """Retain completed chain observations without sharing mutable chain state."""
+        for name, objects in other.objects.items():
+            for value in objects:
+                self.put_object_in_bucket(name, copy.deepcopy(value))
+        for name, scalar in other.scalars.items():
+            for value in scalar["values"]:
+                self.put_scalar_in_bucket(name, scalar["type"], value)
+
     def clear_bucket(self):
         """Clears the bucket"""
         self.objects.clear()

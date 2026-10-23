@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 echo "[*] Syncing dependencies with uv..."
-uv sync -q
+uv sync --locked -q
 
 echo ""
 echo "=== IDOR Test API ==="

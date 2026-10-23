@@ -1,7 +1,7 @@
 # Very Vulnerable GraphQL API — Social Media Edition
 
 A deliberately vulnerable GraphQL API that models a basic social media service.
-It is designed to help validate [GraphQLer](https://github.com/omar2535/GraphQLer)'s
+It is designed to help validate [GraphQLer](https://github.com/mr-pmillz/GraphQLer)'s
 **use-after-free / use-after-delete (UAF)** chain detection.
 
 ## Schema overview

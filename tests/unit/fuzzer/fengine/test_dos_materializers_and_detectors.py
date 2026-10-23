@@ -1,5 +1,6 @@
 """Unit tests for the three new DoS materializers and detectors."""
 
+import json
 import unittest
 from unittest.mock import MagicMock
 
@@ -250,10 +251,11 @@ class TestDOSDetectorBase(unittest.TestCase):
     def _detector(self, klass=FieldDuplicationDetector):
         return _make_dos_detector(klass)
 
-    def test_5xx_is_vulnerable(self):
+    def test_5xx_is_only_potentially_vulnerable(self):
         det = self._detector()
-        self.assertTrue(det._is_vulnerable({}, _mock_response(500)))
-        self.assertTrue(det._is_vulnerable({}, _mock_response(503)))
+        for code in (500, 502, 503, 504):
+            self.assertFalse(det._is_vulnerable({}, _mock_response(code)))
+            self.assertTrue(det._is_potentially_vulnerable({}, _mock_response(code)))
 
     def test_safe_rejection_pattern_is_not_vulnerable(self):
         det = self._detector(CircularFragmentDetector)
@@ -264,17 +266,34 @@ class TestDOSDetectorBase(unittest.TestCase):
                 f"Expected not-vulnerable for safe rejection pattern '{pattern}'",
             )
 
-    def test_timeout_error_in_body_is_vulnerable(self):
+    def test_timeout_error_in_body_is_only_potentially_vulnerable(self):
         det = self._detector()
-        self.assertTrue(det._is_vulnerable({}, _mock_response(200, text="query timeout exceeded")))
+        response = _mock_response(200, text="query timeout exceeded")
+        self.assertFalse(det._is_vulnerable({}, response))
+        self.assertTrue(det._is_potentially_vulnerable({}, response))
 
-    def test_complexity_error_in_body_is_vulnerable(self):
+    def test_complexity_limit_is_safe_rejection(self):
         det = self._detector()
-        self.assertTrue(det._is_vulnerable({}, _mock_response(200, text="query complexity limit reached")))
+        response = _mock_response(200, text="query complexity limit reached")
+        self.assertFalse(det._is_vulnerable({}, response))
+        self.assertFalse(det._is_potentially_vulnerable({}, response))
 
-    def test_429_is_potentially_vulnerable(self):
+    def test_rate_limiting_is_not_vulnerable(self):
         det = self._detector()
-        self.assertTrue(det._is_potentially_vulnerable({}, _mock_response(429)))
+        self.assertFalse(det._is_potentially_vulnerable({}, _mock_response(429)))
+
+    def test_fragment_cycle_validation_error_is_not_vulnerable(self):
+        det = self._detector(CircularFragmentDetector)
+        body = {"errors": [{"message": "Validation error (FragmentCycle): fragment cycle detected"}]}
+        response = _mock_response(400, text=json.dumps(body))
+        self.assertFalse(det._is_vulnerable(body, response))
+        self.assertFalse(det._is_potentially_vulnerable(body, response))
+
+    def test_resource_error_requires_error_context(self):
+        det = self._detector()
+        response = _mock_response(200, text='{"data":{"message":"out of memory"}}')
+        self.assertFalse(det._is_vulnerable({"data": {"message": "out of memory"}}, response))
+        self.assertTrue(det._is_vulnerable({"errors": [{"message": "out of memory"}]}, response))
 
     def test_200_ok_is_not_vulnerable(self):
         det = self._detector()

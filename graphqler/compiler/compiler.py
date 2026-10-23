@@ -7,7 +7,7 @@
 
 from pathlib import Path
 from graphqler.utils import plugins_handler
-from graphqler.utils.file_utils import write_dict_to_yaml, write_json_to_file, initialize_file, intialize_file_if_not_exists
+from graphqler.utils.file_utils import write_dict_to_yaml, write_json_to_file, intialize_file_if_not_exists
 from graphqler.utils.logging_utils import Logger
 from .introspection_query import introspection_query
 from .parsers import QueryListParser, ObjectListParser, MutationListParser, SubscriptionListParser, InputObjectListParser, EnumListParser, UnionListParser, InterfaceListParser, Parser
@@ -15,6 +15,7 @@ from .resolvers import ObjectDependencyResolver, ObjectMethodResolver, MutationO
 from graphqler.chains import ChainGenerator, TopologicalChainStrategy, IDORChainStrategy, UAFChainStrategy, Chain
 from graphqler.graph import GraphGenerator
 from graphqler import config
+from graphqler.output import cataloged
 from clairvoyance.cli import blind_introspection
 
 import asyncio
@@ -68,20 +69,21 @@ class Compiler:
 
         # Create empty files for these files
         Path(self.save_path).mkdir(parents=True, exist_ok=True)
-        initialize_file(self.introspection_result_save_path)
-        initialize_file(self.object_list_save_path)
-        initialize_file(self.input_object_list_save_path)
-        initialize_file(self.mutation_parameter_save_path)
-        initialize_file(self.query_parameter_save_path)
-        initialize_file(self.subscription_parameter_save_path)
-        initialize_file(self.enum_list_save_path)
-        initialize_file(self.union_list_save_path)
-        initialize_file(self.interface_list_save_path)
+        intialize_file_if_not_exists(self.introspection_result_save_path)
+        intialize_file_if_not_exists(self.object_list_save_path)
+        intialize_file_if_not_exists(self.input_object_list_save_path)
+        intialize_file_if_not_exists(self.mutation_parameter_save_path)
+        intialize_file_if_not_exists(self.query_parameter_save_path)
+        intialize_file_if_not_exists(self.subscription_parameter_save_path)
+        intialize_file_if_not_exists(self.enum_list_save_path)
+        intialize_file_if_not_exists(self.union_list_save_path)
+        intialize_file_if_not_exists(self.interface_list_save_path)
         intialize_file_if_not_exists(self.compiled_objects_save_path)
         intialize_file_if_not_exists(self.compiled_mutations_save_path)
         intialize_file_if_not_exists(self.compiled_queries_save_path)
         intialize_file_if_not_exists(self.compiled_subscriptions_save_path)
 
+    @cataloged("compile-graph")
     def run(self):
         """The only function required to be run from the caller, will perform:
         1. Introspection query
@@ -118,7 +120,12 @@ class Compiler:
             self.logger.error(error_message)
             raise SystemExit(error_message)
         else:
+            if not isinstance(result, dict) or not isinstance(result.get("data"), dict) or not isinstance(result["data"].get("__schema"), dict):
+                return {}
             write_json_to_file(result, self.introspection_result_save_path)
+            from graphqler.output import active_store
+            if store := active_store():
+                store.endpoint(self.url, "POST", response.status_code, True, "Introspection returned a GraphQL schema")
             return result
 
     def get_clairvoyance_results(self) -> dict:
@@ -129,8 +136,11 @@ class Compiler:
         """
         wordlist = []
         if config.WORDLIST_PATH != "":
-            with open(config.WORDLIST_PATH, "r") as file:
-                wordlist = file.read().splitlines()
+            wordlist_path = Path(config.WORDLIST_PATH)
+            # The legacy default isn't shipped; an empty list selects the dependency's bundled list.
+            if wordlist_path.exists() or config.WORDLIST_PATH != "static/wordlist.txt":
+                with wordlist_path.open(encoding="utf-8") as file:
+                    wordlist = file.read().splitlines()
 
         schema_str = asyncio.run(
             blind_introspection(
@@ -138,6 +148,8 @@ class Compiler:
                 logger=self.logger,
                 wordlist=wordlist,
                 headers=self.request_utils.get_headers(),
+                proxy=config.PROXY,
+                disable_ssl_verify=not config.VERIFY_TLS,
                 input_document=None,
                 input_schema_path=None,
                 output_path=str(self.introspection_result_save_path),
@@ -215,6 +227,7 @@ class Compiler:
         write_dict_to_yaml(queries, self.compiled_queries_save_path)
         write_dict_to_yaml(subscriptions, self.compiled_subscriptions_save_path)
 
+    @cataloged("compile-chains")
     def run_chain_generation_and_save(self):
         """Builds the dependency graph, runs each configured strategy, and persists the chains.
 

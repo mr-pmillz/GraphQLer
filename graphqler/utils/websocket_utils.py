@@ -8,6 +8,7 @@ Supports two sub-protocols:
 import asyncio
 import json
 import logging
+import ssl
 from typing import Any, Optional, cast
 
 from graphqler import config
@@ -92,12 +93,18 @@ async def _run_subscription(url: str, payload: dict, timeout: float, protocol: s
     try:
         import websockets
     except ImportError:
-        raise ImportError("The 'websockets' package is required for subscription support. Install it with: pip install websockets")
+        raise ImportError("The 'websockets' package is required for subscription support. Restore pinned dependencies with: uv sync --locked")
 
     ws_url = url.replace("http://", "ws://").replace("https://", "wss://")
     extra_headers = headers or {}
 
-    async with websockets.connect(ws_url, subprotocols=cast(Any, [protocol]), additional_headers=extra_headers) as websocket:
+    options: dict[str, Any] = {"proxy": config.PROXY or True, "open_timeout": config.REQUEST_TIMEOUT}
+    if ws_url.startswith("wss://") and not config.VERIFY_TLS:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        options["ssl"] = context
+    async with websockets.connect(ws_url, subprotocols=cast(Any, [protocol]), additional_headers=extra_headers, **options) as websocket:
         if protocol in ("graphql-ws", "graphql-transport-ws"):
             return await _send_graphql_ws(websocket, payload, timeout)
         else:

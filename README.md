@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/omar2535/GraphQLer/main/docs/images/logo.png" />
+  <img src="https://raw.githubusercontent.com/mr-pmillz/GraphQLer/main/docs/images/logo.png" />
   <p align="center">The <strong>only</strong> dependency-aware GraphQL API testing tool</p>
 </p>
 
 <p align="center">
-<a href="https://hub.docker.com/repository/docker/omar2535/graphqler"><img src="https://img.shields.io/docker/image-size/omar2535/graphqler/latest?style=flat&logo=docker"></a>
-<a href="https://pypi.org/project/GraphQLer/"><img src="https://img.shields.io/pypi/v/GraphQLer?style=flat&logo=pypi"/></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/pkgs/container/graphqler"><img src="https://img.shields.io/badge/container-GHCR-blue?logo=docker"></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/releases"><img src="https://img.shields.io/github/v/release/mr-pmillz/GraphQLer"/></a>
 <a href="https://www.python.org/downloads/" target="_blank"><img src="https://img.shields.io/badge/python-3.12-blue" alt="python3.12"/></a>
 </br>
-<a href="https://github.com/omar2535/GraphQLer/actions/workflows/lint.yml" target="_blank"><img src="https://github.com/omar2535/GraphQLer/actions/workflows/lint.yml/badge.svg" alt="lint" /></a>
-<a href="https://github.com/omar2535/GraphQLer/actions/workflows/unit_tests.yml" target="_blank"><img src="https://github.com/omar2535/GraphQLer/actions/workflows/unit_tests.yml/badge.svg?branch=main" alt="unit_test_status" /></a>
-<a href="https://github.com/omar2535/GraphQLer/actions/workflows/e2e_tests.yml" target="_blank"><img src="https://github.com/omar2535/GraphQLer/actions/workflows/e2e_tests.yml/badge.svg?branch=main" alt="e2e_test_status" /></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/actions/workflows/lint.yml" target="_blank"><img src="https://github.com/mr-pmillz/GraphQLer/actions/workflows/lint.yml/badge.svg" alt="lint" /></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/actions/workflows/unit_tests.yml" target="_blank"><img src="https://github.com/mr-pmillz/GraphQLer/actions/workflows/unit_tests.yml/badge.svg?branch=main" alt="unit_test_status" /></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/actions/workflows/e2e_tests.yml" target="_blank"><img src="https://github.com/mr-pmillz/GraphQLer/actions/workflows/e2e_tests.yml/badge.svg?branch=main" alt="e2e_test_status" /></a>
 </br>
 <a href="https://dl.acm.org/doi/10.1145/3832783.3834496"><img src="https://img.shields.io/badge/ACM-ASE%20%2726-0085CA?style=flat&amp;logo=acm&amp;logoColor=white" alt="ACM paper — ASE '26"></a>
-<a href="https://github.com/omar2535/GraphQLer/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-<a href="https://omar2535.github.io/GraphQLer/"><img src="https://img.shields.io/badge/docs-omar2535.github.io%2FGraphQLer-e10098"></a>
+<a href="https://github.com/mr-pmillz/GraphQLer/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+<a href="https://mr-pmillz.github.io/GraphQLer/"><img src="https://img.shields.io/badge/docs-mr-pmillz.github.io%2FGraphQLer-e10098"></a>
 </p>
 
 GraphQLer is a cutting-edge tool designed to dynamically test GraphQL APIs with a focus on awareness. It offers a range of sophisticated features that streamline the testing process and ensure robust analysis of GraphQL APIs such as being able to automatically read a schema and run tests against an API using the schema. Furthermore, GraphQLer is aware of dependencies between objects queries and mutations which is then used to perform security tests against APIs.
@@ -25,6 +25,9 @@ GraphQLer is a cutting-edge tool designed to dynamically test GraphQL APIs with 
 
 ## Key features
 
+- **Endpoint discovery**: Find GraphQL endpoints from a base URL, including versioned paths.
+- **Structured output**: One SQLite catalog, complete JSONL results, and JSONL/Markdown findings reports with evidence and run status.
+- **Batch execution**: Read targets from a file, repeated flags, or comma-separated URLs; isolate target outputs and return exit code 3 for partial success.
 - **Request generation**: Automatically generate valid queries and mutations based on the schema *(supports fragments, unions, interfaces, and enums based on the latest [GraphQL-spec](https://spec.graphql.org/October2021/#sec-ID))*
 - **Dependency awareness**: Run queries and mutations based on their natural dependencies
 - **Resource tracking**: Keep track of any objects seen in the API for future use and reconnaisance
@@ -38,21 +41,41 @@ GraphQLer is a cutting-edge tool designed to dynamically test GraphQL APIs with 
 
 ## Getting started
 
-Quick installation can be done either with [pip](https://pypi.org/project/GraphQLer/):
+Install this fork from source with its hash-locked dependencies:
 
 ```sh
-pip install GraphQLer
-python -m graphqler --help
+git clone https://github.com/mr-pmillz/GraphQLer.git
+cd GraphQLer
+uv sync --locked --extra mcp
+uv run graphqler --help
 ```
 
-or [docker](https://hub.docker.com/repository/docker/omar2535/graphqler/general):
+Or use the fork's [GHCR image](https://github.com/mr-pmillz/GraphQLer/pkgs/container/graphqler) after its publishing workflow runs:
 
 ```sh
-docker pull omar2535/graphqler:latest
-docker run --rm omar2535/graphqler --help
+docker pull ghcr.io/mr-pmillz/graphqler:latest
+docker run --rm ghcr.io/mr-pmillz/graphqler --help
 ```
 
-For a more in-depth guide, check out the [documentation](https://omar2535.github.io/GraphQLer/) and the [installation guide](https://omar2535.github.io/GraphQLer/installation/).
+For a more in-depth guide, check out the [documentation](https://mr-pmillz.github.io/GraphQLer/) and the [installation guide](https://mr-pmillz.github.io/GraphQLer/installation/).
+
+```sh
+# Discover endpoints without fuzzing
+uv run graphqler --mode discover --url https://example.com/ --output discovery
+
+# Discover automatically from a base URL, then compile and fuzz
+uv run graphqler --mode run --url https://example.com/ \
+  --output results --format sqlite,jsonl,markdown
+
+# Scan a batch; failed targets do not discard successful results
+uv run graphqler --mode run --input targets.txt --output batch-results \
+  --proxy http://127.0.0.1:8080 --request-timeout 15 --max-time 300
+```
+
+`--path` remains an alias for `--output`. Use `--insecure` explicitly with an
+intercepting proxy whose certificate is not trusted. See [output contracts and
+exit codes](docs/output.md) for ingestion details. Releases publish wheels, source
+archives, checksums, and GHCR images under `mr-pmillz/GraphQLer`.
 
 ## Interactive TUI
 
@@ -82,7 +105,7 @@ An animated splash screen is shown on first launch each day. Press any key to sk
 ```sh
 ❯ python -m graphqler --help
 usage: __main__.py [-h] [--url URL] [--path PATH] [--config CONFIG] --mode
-                   {compile,compile-graph,compile-chains,fuzz,idor,run,single} [--auth AUTH] [--idor-auth IDOR_AUTH]
+                   {discover,compile,compile-graph,compile-chains,fuzz,idor,run,single} [--auth AUTH] [--idor-auth IDOR_AUTH]
                    [--proxy PROXY] [--node NODE] [--plugins-path PLUGINS_PATH] [--use-llm] [--llm-report]
                    [--llm-model LLM_MODEL] [--llm-api-key LLM_API_KEY] [--llm-base-url LLM_BASE_URL]
                    [--llm-max-retries LLM_MAX_RETRIES] [--disable-mutations] [--no-objects-bucket]
@@ -94,7 +117,7 @@ options:
   --url URL             remote host URL (required for all modes except compile-chains)
   --path PATH           directory location for files to be saved-to/used-from. Defaults to graphqler-output
   --config CONFIG       TOML configuration file for the program
-  --mode {compile,compile-graph,compile-chains,fuzz,idor,run,single}
+  --mode {discover,compile,compile-graph,compile-chains,fuzz,idor,run,single}
                         mode to run the program in
   --auth AUTH           authentication token(s). Can be 'token' or 'profile=token'. Multiple allowed.
   --idor-auth IDOR_AUTH
@@ -255,7 +278,7 @@ GraphQLer exposes its compile, fuzz, and run operations as [Model Context Protoc
 The MCP server requires the optional `mcp` extras:
 
 ```sh
-pip install GraphQLer[mcp]
+uv sync --locked --extra mcp
 ```
 
 ### Starting the server
@@ -292,7 +315,7 @@ All tools accept an optional `auth` parameter for APIs that require an `Authoriz
 
 ### Plugins
 
-You can also implement your own plugins for custom authentication (ie. short token lifetimes). See more in the [plugins documentation](https://omar2535.github.io/GraphQLer/plugins/).
+You can also implement your own plugins for custom authentication (ie. short token lifetimes). See more in the [plugins documentation](https://mr-pmillz.github.io/GraphQLer/plugins/).
 
 ## Citation
 

@@ -1,3 +1,4 @@
+const { expressMiddleware } = require("@as-integrations/express5");
 /**
  * ssrf-api
  *
@@ -11,7 +12,7 @@
  * DO NOT deploy this outside of a local test environment.
  */
 
-const { ApolloServer } = require("apollo-server-express");
+const { ApolloServer } = require("@apollo/server");
 const express = require("express");
 const http = require("http");
 const https = require("https");
@@ -132,7 +133,7 @@ async function startServer() {
   });
 
   await server.start();
-  server.applyMiddleware({ app });
+  app.use("/graphql", express.json(), expressMiddleware(server));
 
   app.listen(PORT, () => {
     console.log(`> ssrf-api ready at http://localhost:${PORT}/graphql`);

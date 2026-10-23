@@ -1,4 +1,5 @@
 import unittest
+import sqlite3
 from graphqler import core
 from graphqler.utils.config_handler import parse_config
 from tests.e2e.utils.run_api import run_node_project, wait_for_server
@@ -46,3 +47,6 @@ class TestCore(unittest.TestCase):
         assert stats.number_of_successes > 0
         assert stats.number_of_objects > 0
         assert len(results) > 0
+        with sqlite3.connect(result["database"]) as db:
+            assert db.execute("SELECT mode,status FROM runs WHERE run_id=?", (result["run_id"],)).fetchone() == ("run", "completed")
+            assert db.execute("SELECT COUNT(*) FROM results WHERE run_id=?", (result["run_id"],)).fetchone()[0] > 0

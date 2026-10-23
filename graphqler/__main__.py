@@ -2,18 +2,23 @@
 Graphler - main start
 """
 
-import sys
 import argparse
 import importlib.metadata
+import sys
+from urllib.parse import urlsplit
 
+from graphqler import config
 from graphqler.compiler.compiler import Compiler
+from graphqler.discovery import discover, validate_url, write_discovery
 from graphqler.fuzzer import Fuzzer
 from graphqler.graph import GraphGenerator
-from graphqler.utils.stats import Stats
-from graphqler.utils.cli_utils import set_auth_token_constant, set_idor_auth_token_constant, is_compiled
-from graphqler.utils.config_handler import parse_config, set_config, generate_new_config, does_config_file_exist_in_path, write_config_to_toml
+from graphqler.output import ResultStore, recording
+from graphqler.utils.cli_utils import is_compiled, set_auth_token_constant, set_idor_auth_token_constant
+from graphqler.utils.config_handler import does_config_file_exist_in_path, generate_new_config, parse_config, set_config, write_config_to_toml
 from graphqler.utils.file_utils import get_or_create_directory
-from graphqler import config
+from graphqler.utils.request_utils import reset_session
+from graphqler.utils.stats import Stats
+
 
 def run_compile_mode(compiler: Compiler, path: str, url: str):
     """Runs the full compilation pipeline by delegating to compile-graph then compile-chains.
@@ -115,7 +120,48 @@ def run_single_mode(path: str, url: str, name: str):
     Fuzzer(path, url).run_single(name)
 
 
-def main(args: dict):
+def main(args: dict) -> int:
+    """Execute validated single-target or batch input and return a documented exit code."""
+    from graphqler.batch import run_batch
+    return run_batch(args, _run_target)
+
+
+def _run_target(args: dict) -> ResultStore:
+    """Resolve configuration and execute one durably cataloged invocation."""
+    args = dict(args)
+    args['path'] = args.get('path') or config.OUTPUT_DIRECTORY
+    args['url'] = args.get('url') or ""
+    reset_session()
+    getattr(Stats, "reset")()
+    from graphqler.utils.logging_utils import reset_loggers
+    from graphqler.utils.objects_bucket import ObjectsBucket
+    reset_loggers()
+    getattr(ObjectsBucket, "reset")()
+    store = ResultStore(args['path'], args['url'], args['mode'], args.get('customer_id'), args.get('job_id'),
+                        database=args.get('_database'), formats=args.get('_formats'), output_root=args.get('_output_root'))
+    with recording(store):
+        try:
+            _configure_target(args)
+            _execute(args, store)
+        except KeyboardInterrupt as exc:
+            store.finish("interrupted", "Interrupted by user")
+            # The batch can publish completed and interrupted runs before exiting.
+            setattr(exc, "result_store", store)
+            raise
+        except TimeoutError as exc:
+            store.finish("timed_out", str(exc))
+            print(f"(E) {store.clean(str(exc))}", file=sys.stderr)
+        except BaseException as exc:
+            store.finish("failed", str(exc))
+            print(f"(E) {store.clean(str(exc))}", file=sys.stderr)
+        else:
+            store.finish()
+    print(f"(RESULTS): Output: {store.directory} (run {store.run_id}, {store.run_info()['status']})")
+    return store
+
+
+def _configure_target(args: dict) -> None:
+    """Apply file configuration and command-line overrides for the current target."""
     # Run either compilation or fuzzing mode
     if 'mode' not in args or not args['mode']:
         print("Please provide a mode to run the program in")
@@ -126,22 +172,17 @@ def main(args: dict):
         print(f"--url is required for mode '{args['mode']}'")
         sys.exit(1)
 
-    # If not compile mode, check if compiled directory exists
-    if args['mode'] not in ["compile", "compile-graph", "compile-chains", "run", "single", "idor"] and not is_compiled(args['path']):
-        print("(!) Compiled directory does not exist, please run in compile mode first")
-        sys.exit(1)
-
     # Set the path if provided and create the directory if it doesn't exist
-    if 'path' in args and args['path']:
+    if args.get('path'):
         config.OUTPUT_DIRECTORY = args['path']
     get_or_create_directory(config.OUTPUT_DIRECTORY)
 
     # Set proxy if provided
-    if 'proxy' in args and args['proxy']:
+    if args.get('proxy'):
         config.PROXY = args['proxy']
 
     # Parse config if provided
-    if 'config' in args and args['config']:
+    if args.get('config'):
         print("(P) Using provided config file")
         new_config = parse_config(args['config'])
         set_config(new_config)
@@ -154,15 +195,26 @@ def main(args: dict):
         generate_new_config(f"{args['path']}/{config.CONFIG_FILE_NAME}")
 
     # Parse plugins if defined
-    if 'plugins_path' in args and args['plugins_path']:
+    if args.get('plugins_path'):
         config.PLUGINS_PATH = args['plugins_path']
         print(f"(P) Using plugins from {config.PLUGINS_PATH}")
 
     # CLI overrides — applied after set_config so they always win over the config file
     # Re-assert --path here so that a config file containing OUTPUT_DIRECTORY does not
     # silently override the directory the user explicitly specified on the command line.
-    if 'path' in args and args['path']:
+    if args.get('path'):
         config.OUTPUT_DIRECTORY = args['path']
+    if args.get('proxy'):
+        config.PROXY = args['proxy']
+    for header in args.get("header") or []:
+        name, value = header.split(":", 1)
+        config.CUSTOM_HEADERS[name.strip()] = value.strip()
+    if args.get("request_timeout") is not None:
+        config.REQUEST_TIMEOUT = args["request_timeout"]
+    if args.get("max_time") is not None:
+        config.MAX_TIME = args["max_time"]
+    if args.get("insecure"):
+        config.VERIFY_TLS = False
 
     if args.get('auth'):
         # Multi-auth support: --auth profile=token or just --auth token (defaults to primary)
@@ -240,27 +292,57 @@ def main(args: dict):
 
     if args.get('classic_coverage'):
         config.NO_DATA_COUNT_AS_SUCCESS = True
+        print("(P) Classic coverage mode enabled — all non-error responses count as successes")
     if args.get('debug'):
         config.DEBUG = True
-        print("(P) Classic coverage mode enabled — all non-error responses count as successes")
 
     # Persist the final resolved config (file defaults + CLI overrides) back to disk
     write_config_to_toml(f"{args['path']}/{config.CONFIG_FILE_NAME}")
 
-    # Initialize the compiler and fuzzer
-    compiler = Compiler(args['path'], args['url'])
-    # Start the program
-    if args['mode'] == "compile":
-        run_compile_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
-    elif args['mode'] == "compile-graph":
-        run_compile_graph_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
-    elif args['mode'] == "compile-chains":
-        run_compile_chains_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
-    elif args['mode'] == "fuzz":
-        fuzzer = Fuzzer(args['path'], args['url'])
-        run_fuzz_mode(fuzzer, config.OUTPUT_DIRECTORY, args['url'])
-    elif args['mode'] == "run":
-        run_compile_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
+    reset_session()
+    if args['url']:
+        args['url'] = validate_url(args['url'])
+
+
+def _execute(args: dict, store: ResultStore) -> None:
+    """Run discovery or scanning after the output transaction has been initialized."""
+    if args['mode'] in {"fuzz", "single", "idor"} and not is_compiled(args['path']):
+        raise ValueError("Compiled directory does not exist; run in compile mode first")
+    should_discover = args['mode'] == "discover" or args.get('discover') or (
+        args['mode'] in {"run", "compile", "compile-graph"} and urlsplit(args['url']).path in {"", "/"} and not args.get('no_discovery')
+    )
+    if should_discover:
+        observations = discover(args['url'], args.get('discovery_wordlist'), args.get('discovery_timeout', 5),
+                                args.get('discovery_max_time', 60), first=args['mode'] != "discover")
+        write_discovery(args['path'], observations)
+        matches = [item for item in observations if item.confirmed]
+        for item in matches:
+            print(f"(D) GraphQL endpoint: {item.method} {item.url}")
+        if args['mode'] == "discover":
+            if not matches:
+                print("(D) No GraphQL endpoints confirmed; probe results are in the catalog")
+            return
+        post_matches = [item for item in matches if item.method == "POST"]
+        if not post_matches:
+            raise ValueError("No POST GraphQL endpoint confirmed; inspect discovery results or provide an explicit endpoint URL")
+        args['url'] = post_matches[0].url
+        store.set_target(args['url'])
+
+    if args['mode'] in {"fuzz", "run", "idor", "single"}:
+        Stats().set_file_paths(args['path'])
+
+    # Construct a compiler only for compilation: its initializer truncates schema files.
+    if args['mode'] in {"compile", "compile-graph", "compile-chains", "run"}:
+        compiler = Compiler(args['path'], args['url'])
+        if args['mode'] == "compile-graph":
+            run_compile_graph_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
+        elif args['mode'] == "compile-chains":
+            run_compile_chains_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
+        else:
+            run_compile_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
+        if args['mode'] != "run":
+            return
+    if args['mode'] in {"run", "fuzz"}:
         fuzzer = Fuzzer(args['path'], args['url'])
         run_fuzz_mode(fuzzer, config.OUTPUT_DIRECTORY, args['url'])
     elif args['mode'] == "idor":
@@ -270,10 +352,13 @@ def main(args: dict):
             print("Please provide a node to run in single mode")
             sys.exit(1)
         run_single_mode(args['path'], args['url'], args['node'])
+    else:
+        raise ValueError(f"Unknown mode: {args['mode']}")
 
 
 # If running as a CLI
-if __name__ == "__main__":
+def cli():
+    """Console entry point shared by the package command and python -m graphqler."""
     # If version, display version and exit
     if "--version" in sys.argv:
         version = importlib.metadata.version("GraphQLer")
@@ -291,19 +376,18 @@ if __name__ == "__main__":
                 sys.exit(2)
             transport = sys.argv[idx + 1]
         try:
-            from graphqler.utils.mcp_utils.server import serve, TRANSPORTS
+            from graphqler.utils.mcp_utils.server import TRANSPORTS, serve
         except ImportError:
             print(
                 "The 'mcp' package is required to run the MCP server.\n"
-                "Install it with:  pip install GraphQLer[mcp]",
+                "Install from this checkout with: uv sync --locked --extra mcp",
                 file=sys.stderr,
             )
             sys.exit(1)
         if transport not in TRANSPORTS:
             print(f"Invalid transport '{transport}'. Choose from: {', '.join(TRANSPORTS)}", file=sys.stderr)
             sys.exit(1)
-        from typing import cast, Literal
-        serve(transport=cast(Literal["stdio", "http", "sse", "streamable-http"], transport))
+        serve(transport=transport)
         sys.exit(0)
 
     # Launch TUI when called with no arguments
@@ -315,13 +399,28 @@ if __name__ == "__main__":
 
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", help="remote host URL (required for all modes except compile-chains)", required=False)
-    parser.add_argument("--path", help=f"directory location for files to be saved-to/used-from. Defaults to {config.OUTPUT_DIRECTORY}", required=False)
+    parser.add_argument("--url", "-u", help="target URL(s), comma-separated or repeated", action="append")
+    parser.add_argument("--input", "-i", "--targets-file", help="file of target URLs (one per line; # comments allowed)")
+    parser.add_argument("--output", "-o", "--path", dest="path", help=f"output directory (default: {config.OUTPUT_DIRECTORY})")
+    parser.add_argument("--format", "-f", action="append", help="output formats, comma-separated or repeated: sqlite,jsonl,markdown,universal,all (default: sqlite,jsonl,markdown)")
+    parser.add_argument("--fail-on-findings", nargs="?", const="info", choices=["info", "low", "medium", "high", "critical"], help="exit 4 when a confirmed finding meets this severity (default threshold: info)")
     parser.add_argument("--config", help="TOML configuration file for the program", required=False)
-    parser.add_argument("--mode", help="mode to run the program in", choices=["compile", "compile-graph", "compile-chains", "fuzz", "idor", "run", "single"], required=True)
+    parser.add_argument("--mode", help="mode to run the program in", choices=["discover", "compile", "compile-graph", "compile-chains", "fuzz", "idor", "run", "single"], required=True)
+    discovery_flags = parser.add_mutually_exclusive_group()
+    discovery_flags.add_argument("--discover", help="discover a POST GraphQL endpoint before scanning (automatic for origin URLs)", action="store_true")
+    discovery_flags.add_argument("--no-discovery", help="use the supplied URL directly, including origin URLs", action="store_true")
+    parser.add_argument("--discovery-wordlist", help="file of endpoint paths to probe instead of the built-in list")
+    parser.add_argument("--discovery-timeout", type=float, default=5, help="timeout per discovery request in seconds (default: 5)")
+    parser.add_argument("--discovery-max-time", type=float, default=60, help="total discovery time budget in seconds (default: 60)")
+    parser.add_argument("--customer-id", help="caller-supplied customer identifier for universal export (requires --job-id)")
+    parser.add_argument("--job-id", help="caller-supplied job identifier for universal export (requires --customer-id)")
     parser.add_argument("--auth", help="authentication token(s). Can be 'token' or 'profile=token'. Multiple allowed.", action="append", required=False)
     parser.add_argument("--idor-auth", help="secondary (attacker) auth token for chain-based IDOR testing. Example: 'Bearer secondtoken'", required=False)
     parser.add_argument("--proxy", help="proxy to use for requests (ie. http://127.0.0.1:8080)", required=False)
+    parser.add_argument("--header", "-H", action="append", help="custom HTTP header, repeated as 'Name: value'")
+    parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification, including with an intercepting proxy")
+    parser.add_argument("--request-timeout", type=float, help="timeout per HTTP request in seconds")
+    parser.add_argument("--max-time", type=float, help="maximum fuzzing time per target in seconds")
     parser.add_argument("--node", help="node to run (only used in single mode)", required=False)
     parser.add_argument("--plugins-path", help="path to plugins directory", required=False)
     parser.add_argument("--use-llm", help="enable LLM-powered features: dependency graph inference, endpoint classification, IDOR chain classification, and UAF chain classification (requires LLM_MODEL and credentials)", action="store_true", default=False)
@@ -347,7 +446,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", help="enable debug mode: runs the fuzzer in a thread instead of a subprocess so pdb/breakpoint() work", action="store_true", default=False)
 
     # MCP server flags (handled before argument parsing; registered here for --help visibility)
-    parser.add_argument("--mcp", help="launch the GraphQLer MCP server (requires pip install GraphQLer[mcp])", action="store_true", default=False)
+    parser.add_argument("--mcp", help="launch the GraphQLer MCP server (requires the mcp extra)", action="store_true", default=False)
     parser.add_argument("--mcp-transport", help="MCP transport to use: 'stdio' (default), 'sse', 'streamable-http', or 'http'", default="stdio", choices=["stdio", "sse", "streamable-http", "http"], metavar="TRANSPORT")
 
     args = parser.parse_args()
@@ -356,4 +455,14 @@ if __name__ == "__main__":
     # Some massaging
     if args_as_dict['path'] is None:
         args_as_dict['path'] = config.OUTPUT_DIRECTORY
-    main(args_as_dict)
+    try:
+        sys.exit(main(args_as_dict))
+    except (ValueError, RuntimeError, TimeoutError, OSError) as exc:
+        print(f"(E) {exc}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
+if __name__ == "__main__":
+    cli()

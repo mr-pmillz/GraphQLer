@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mr-pmillz/GraphQLer/raw/main/graphqler/output/native.schema.json",
+  "title": "GraphQLer native record v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "record_type",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "graphqler/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "record_type": {
+      "enum": [
+        "run",
+        "endpoint",
+        "request",
+        "result",
+        "finding",
+        "artifact"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "run"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "run_id",
+              "schema_version",
+              "tool_version",
+              "target",
+              "mode",
+              "started_at",
+              "status",
+              "summary"
+            ],
+            "properties": {
+              "run_id": {
+                "type": "string"
+              },
+              "schema_version": {
+                "type": "string"
+              },
+              "tool_version": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "running",
+                  "completed",
+                  "failed",
+                  "timed_out",
+                  "interrupted"
+                ]
+              },
+              "summary": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "endpoint"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "run_id",
+              "url",
+              "method",
+              "confirmed",
+              "evidence",
+              "observed_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "confirmed": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "observed_at": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "run_id",
+              "url",
+              "method",
+              "response_headers",
+              "response_body",
+              "elapsed_seconds",
+              "observed_at",
+              "payload"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "response_headers": {
+                "type": "object"
+              },
+              "response_body": {
+                "type": "string"
+              },
+              "elapsed_seconds": {
+                "type": "number"
+              },
+              "observed_at": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "result"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "run_id",
+              "node",
+              "graphql_type",
+              "result_type",
+              "success",
+              "raw_response",
+              "observed_at",
+              "payload"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "graphql_type": {
+                "type": "string"
+              },
+              "result_type": {
+                "type": "string"
+              },
+              "success": {
+                "type": "boolean"
+              },
+              "raw_response": {
+                "type": "string"
+              },
+              "observed_at": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "finding"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "run_id",
+              "detector",
+              "node",
+              "status",
+              "severity",
+              "confidence",
+              "evidence",
+              "observed_at",
+              "payload"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "detector": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "confirmed",
+                  "potential"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "info",
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ]
+              },
+              "confidence": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "confirmed"
+                ]
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "observed_at": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "record_type": {
+            "const": "artifact"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "id",
+              "run_id",
+              "path",
+              "role",
+              "media_type",
+              "sha256",
+              "size_bytes",
+              "stored_bytes",
+              "truncated"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "media_type": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size_bytes": {
+                "type": "integer"
+              },
+              "stored_bytes": {
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ]
+}

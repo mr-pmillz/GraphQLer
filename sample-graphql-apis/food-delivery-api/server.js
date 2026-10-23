@@ -1,4 +1,5 @@
-const {ApolloServer} = require("apollo-server-express");
+const { expressMiddleware } = require("@as-integrations/express5");
+const {ApolloServer} = require("@apollo/server");
 const {v4} = require("uuid");
 const express = require("express");
 const sqlite3 = require('sqlite3');
@@ -437,7 +438,7 @@ const server = new ApolloServer({
 
 async function startApolloServer() {
   await server.start();
-  server.applyMiddleware({ app });
+  app.use("/graphql", express.json(), expressMiddleware(server));
 
   const PORT = process.env.PORT || 4000;
 

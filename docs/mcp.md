@@ -5,7 +5,7 @@ GraphQLer exposes compile, fuzz and run as [Model Context Protocol (MCP)](https:
 ## Installation
 
 ```sh
-pip install "GraphQLer[mcp]"
+uv sync --locked --extra mcp
 ```
 
 ## Starting the server
