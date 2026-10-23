@@ -30,6 +30,7 @@ Special invocations:
 | `--insecure` | Explicitly disable TLS certificate verification. |
 | `--header HEADER`, `-H HEADER` | Repeat custom headers as `Name: value`; applies to discovery and scanning. |
 | `--request-timeout SECONDS` | Per-request HTTP timeout. |
+| `--max-response-bytes BYTES` | Maximum wire and decoded scan response size (default: 16 MiB). |
 | `--max-time SECONDS` | Fuzzing time budget per target; partial evidence is retained on timeout. |
 
 ## Discovery

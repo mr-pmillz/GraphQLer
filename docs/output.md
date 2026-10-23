@@ -78,9 +78,16 @@ FROM findings f JOIN results e ON e.id = f.result_id;
 Each observation commits independently. A normal failure, timeout, or Ctrl-C
 finalizes the available evidence with `failed`, `timed_out`, or `interrupted` status.
 A forcibly killed parent can leave a `running` row: treat it as incomplete, not
-successful-empty. Export errors fail the run. JSON files are atomically replaced;
-the native manifest is published last and carries the `results.jsonl` SHA-256.
+successful-empty. Each new invocation replaces the old manifest with `running`
+state before executing. Export errors fail the affected run and remaining batch
+targets continue. Aggregate reports read committed rows directly, including
+evidence from targets whose individual report export failed.
+JSON files are atomically replaced with private permissions; the final native
+manifest is published last and carries the `results.jsonl` SHA-256.
 Copy a closed catalog, or use SQLite's backup API while a scan is running.
+If an export fails when `sqlite` was not selected, GraphQLer retains its private
+temporary catalog and prints its recovery path to stderr. Ctrl-C remains exit
+`130` even if publishing the interrupted results also fails.
 
 Artifacts include changed outputs and the compiled schema inputs used for the run.
 Each embedded file is limited to 16 MiB; the stored size and `truncated` flag make
@@ -95,6 +102,9 @@ are not included in `requests`.
 
 Configured authentication values are redacted from structured output, and sensitive
 response headers are masked. Captured application data may still be sensitive.
+Redaction covers escaped credentials and sensitive URL query parameters while
+preserving schema keys, IDs, and status values. Output writes reject nested
+directory symlinks; database files must be regular files with a single link.
 Do not run concurrent scans against the same output directory: compilation and
 legacy working files are mutable. Use different directories for concurrent jobs.
 
@@ -132,6 +142,25 @@ from the targets already attempted.
 Mixed execution failures take priority over the optional findings threshold. A
 responsive host with no GraphQL endpoints is a valid empty discovery result; a
 target that returns no HTTP responses is a failed discovery.
+Fuzzing that receives only transport errors also fails rather than reporting an
+empty successful scan.
+
+## HTTP boundaries
+
+Normal scanning and discovery follow only same-origin redirects, retaining a
+request record for each hop. Redirects that require changing a POST to GET are
+not treated as confirmed POST endpoints. `--request-timeout` bounds a complete
+scan request, including redirect hops and streamed response reads. Discovery also
+has its own total time budget. Responses are limited to 16 MiB for scanning and
+1 MiB for discovery, including decompressed bytes; use `--max-response-bytes` or
+`MAX_RESPONSE_BYTES` in the config for larger scan responses. Partial response evidence is retained
+when a limit is exceeded.
+
+An explicit `--proxy` takes precedence over environment proxy settings. Ambient
+`.netrc` credentials are never used. Secondary and anonymous profiles inherit
+ordinary custom headers; credentials such as Authorization, cookies, and API keys
+must be supplied explicitly for each profile. The post-delete profile uses the
+primary identity so use-after-delete checks retain the original authentication.
 
 ## Universal export
 
@@ -167,6 +196,7 @@ graphqler-output/
 │   ├── compiled_mutations.yml
 │   ├── compiled_objects.yml
 │   ├── compiled_subscriptions.yml
+│   ├── target.json              # compilation status and original/selected target
 │   └── chains/
 │       ├── regular.yml          # dependency-ordered fuzzing chains
 │       ├── idor.yml             # IDOR candidate chains (with a secondary token)
@@ -191,6 +221,12 @@ graphqler-output/
 ## Compiled files
 
 The files under `compiled/` are human-readable YAML and can be edited before running `--mode fuzz`. Nodes whose dependencies could not be resolved are marked as `UNKNOWNS`; you may fill them in manually, otherwise they are fuzzed without a dependency chain. Regenerate chains after edits with `--mode compile-chains`.
+
+New compilations bind their artifacts to the original URL and discovered endpoint.
+Reusing the original base URL in fuzz mode selects that saved endpoint. A different
+target requires a new compilation or output directory. Starting compilation
+invalidates previous chains; incomplete compilation cannot be reused. Legacy
+artifacts without a target marker remain supported when the required files are nonempty.
 
 ## Dependency graph
 

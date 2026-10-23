@@ -15,7 +15,7 @@ from graphqler.fuzzer.engine.types import Result, ResultEnum
 from graphqler.graph import Node
 from graphqler.output import active_store
 
-from .file_utils import get_or_create_file, initialize_file, intialize_file_if_not_exists, recreate_path
+from .file_utils import get_or_create_directory, get_or_create_file, initialize_file, intialize_file_if_not_exists, open_output, recreate_path
 from .singleton import singleton
 
 
@@ -382,7 +382,7 @@ class Stats :
         """
         covered, total, coverage_frac = self.get_coverage_rate()
         failed, _, negative_frac = self.get_negative_coverage_rate()
-        with open(self.file_path, "w") as f:
+        with open_output(self.file_path, "w") as f:
             f.write("\n===================HTTP Status Codes===================\n")
             f.write(json.dumps(self.http_status_codes, indent=4))
             f.write("\n===================Successful Nodes===================\n")
@@ -437,7 +437,7 @@ class Stats :
             "vulnerabilities": self.vulnerabilities,
             "node_timings": self.node_timings,
         }
-        with open(json_path, "w") as f:
+        with open_output(json_path, "w") as f:
             json.dump(report, f, indent=4)
         if store := active_store():
             store.summary(report)
@@ -463,7 +463,7 @@ class Stats :
             return
 
         eval_dir = Path(eval_dir)
-        eval_dir.mkdir(parents=True, exist_ok=True)
+        get_or_create_directory(eval_dir)
 
         covered, total, coverage_frac = self.get_coverage_rate()
         failed, _, negative_frac = self.get_negative_coverage_rate()
@@ -495,12 +495,12 @@ class Stats :
 
         # Append to a cumulative JSONL file so multiple runs stack up
         runs_file = eval_dir / "ablation_runs.jsonl"
-        with open(runs_file, "a") as f:
+        with open_output(runs_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
         # Also write a human-readable summary
         summary_file = eval_dir / "ablation_summary.txt"
-        with open(summary_file, "a") as f:
+        with open_output(summary_file, "a") as f:
             f.write(f"\n{'='*60}\n")
             f.write(f"Run at: {entry['timestamp']}\n")
             f.write(f"  USE_OBJECTS_BUCKET    : {config.USE_OBJECTS_BUCKET}\n")
@@ -545,7 +545,7 @@ class Stats :
         # Write the unique results to the file
         for result_file_path, payloads in unique_results.items():
             intialize_file_if_not_exists(result_file_path)
-            with open(result_file_path, "w") as f:
+            with open_output(result_file_path, "w") as f:
                 for payload, response in payloads.items():
                     f.write("------------------Payload:-------------------\n")
                     f.write(f"{payload}\n")
@@ -554,7 +554,7 @@ class Stats :
 
     def save_unique_response(self):
         """Saves the unique responses to a file"""
-        with open(Path(self.unique_responses_file_path), "w") as f:
+        with open_output(self.unique_responses_file_path, "w") as f:
             for response, endpoints in self.unique_responses.items():
                 f.write(f"Response: {response}\n")
                 f.write(f"Endpoints: {endpoints}\n")
@@ -562,7 +562,7 @@ class Stats :
     def __save_pickle(self):
         """Saves the stats to a pickle file"""
         self.pickle_save_path = get_or_create_file(self.pickle_save_path)
-        with open(self.pickle_save_path, "wb") as file:
+        with open_output(self.pickle_save_path, "wb") as file:
             pickle.dump(self, file)
 
     def __load_pickle(self):

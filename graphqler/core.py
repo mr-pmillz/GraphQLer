@@ -1,6 +1,6 @@
 from graphqler.fuzzer import Fuzzer
 from graphqler.compiler import Compiler
-from graphqler.utils.config_handler import set_config
+from graphqler.utils.config_handler import isolated_run, set_config, validate_config
 from graphqler.utils.stats import Stats
 from graphqler.utils.objects_bucket import ObjectsBucket
 from graphqler.utils.api import API
@@ -10,6 +10,7 @@ from graphqler.output import scan_run
 from graphqler.utils.logging_utils import reset_loggers
 
 
+@isolated_run
 def compile_and_fuzz(path: str, url: str, input_config: dict | None = None) -> dict:
     """
     Runs the program in compile and fuzz mode.
@@ -38,6 +39,7 @@ def compile_and_fuzz(path: str, url: str, input_config: dict | None = None) -> d
     """
     if input_config:
         set_config(input_config)
+    validate_config()
     config.OUTPUT_DIRECTORY = path
     getattr(Stats, "reset")()
     getattr(ObjectsBucket, "reset")()

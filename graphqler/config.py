@@ -135,6 +135,7 @@ ID_ENUMERATION_SCOPE_HEURISTIC: bool = True  # Classify endpoint scope (private/
 
 """For each request"""
 REQUEST_TIMEOUT: float = 120  # in seconds
+MAX_RESPONSE_BYTES: int = 16 * 1024 * 1024  # maximum wire and decoded HTTP response size
 TIME_BETWEEN_REQUESTS: float = 0.001  # in seconds
 
 """For custom skipping nodes"""

@@ -1,10 +1,35 @@
 import os
+import copy
+import threading
+from functools import wraps
 import json
-import shutil
+import math
+from pathlib import Path
 import tomllib
 
 from graphqler import config
 from graphqler.utils.file_utils import get_graphqler_root
+
+
+pipeline_lock = threading.RLock()
+
+
+def isolated_run(function):
+    """Serialize embedded runs and restore credentials/configuration even on failure."""
+    @wraps(function)
+    def run(*args, **kwargs):
+        with pipeline_lock:
+            baseline = {key: copy.deepcopy(value) for key, value in vars(config).items() if key.isupper()}
+            try:
+                return function(*args, **kwargs)
+            finally:
+                for key, value in baseline.items():
+                    setattr(config, key, value)
+                from graphqler.utils.request_utils import reset_session
+                from graphqler.utils.logging_utils import reset_loggers
+                reset_session()
+                reset_loggers()
+    return run
 
 
 def write_config_to_toml(path: str) -> None:
@@ -62,7 +87,12 @@ def write_config_to_toml(path: str) -> None:
             continue
         lines.append(f'{json.dumps(k, ensure_ascii=False)} = {json.dumps(str(v), ensure_ascii=False)}\n')
 
-    with open(path, "w") as fh:
+    from graphqler.output import active_store
+    from graphqler.output.files import atomic_writer
+    output = Path(path).absolute()
+    store = active_store()
+    root = store.output_root if store else output.parent.resolve()
+    with atomic_writer(output, root) as fh:
         fh.writelines(lines)
 
 
@@ -92,12 +122,28 @@ def set_config(new_config: dict):
         new_config (dict): The configuration dictionary
     """
     for k, v in new_config.items():
-        if hasattr(config, k):
+        if k.isupper() and hasattr(config, k):
             setattr(config, k, v)
         else:
             print(f"(!) Unknown configuration {k}, skipping it")
     from graphqler.utils.request_utils import reset_session
     reset_session()
+
+
+def validate_config() -> None:
+    """Reject invalid resource limits before starting a worker or network request."""
+    for key in ("REQUEST_TIMEOUT", "MAX_TIME"):
+        value = getattr(config, key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{key} must be finite and positive")
+    for key in ("MAX_RESPONSE_BYTES", "MAX_FUZZING_ITERATIONS"):
+        value = getattr(config, key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{key} must be a positive integer")
+    if not isinstance(config.TIME_BETWEEN_REQUESTS, (int, float)) or not math.isfinite(config.TIME_BETWEEN_REQUESTS) or config.TIME_BETWEEN_REQUESTS < 0:
+        raise ValueError("TIME_BETWEEN_REQUESTS must be finite and nonnegative")
+    if not isinstance(config.CUSTOM_HEADERS, dict) or not isinstance(config.PROFILES, dict):
+        raise ValueError("CUSTOM_HEADERS and PROFILES must be dictionaries")
 
 
 def generate_new_config(config_file_to_write: str) -> None:
@@ -108,7 +154,13 @@ def generate_new_config(config_file_to_write: str) -> None:
     """
     # copy from the base path of the graphqler package
     project_root = get_graphqler_root()
-    shutil.copyfile(project_root / "examples" / "config.toml", config_file_to_write)
+    from graphqler.output import active_store
+    from graphqler.output.files import atomic_writer
+    output = Path(config_file_to_write).absolute()
+    store = active_store()
+    root = store.output_root if store else output.parent.resolve()
+    with atomic_writer(output, root) as target:
+        target.write((project_root / "examples" / "config.toml").read_text(encoding="utf-8"))
 
 
 def does_config_file_exist_in_path(path: str) -> bool:

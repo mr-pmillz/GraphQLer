@@ -13,6 +13,7 @@ import requests
 
 from graphqler.output import active_store
 from graphqler.utils import request_utils
+from graphqler.utils.http_deadline import cancel_deadline, response_deadline
 
 DEFAULT_PATHS = (
     "graphql", "graphql/v1", "graphql/v2", "v1/graphql", "v2/graphql", "api/graphql",
@@ -37,11 +38,11 @@ class Endpoint:
 def validate_url(value: str) -> str:
     """Accept absolute HTTP URLs with a host and no embedded credentials."""
     parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None or parsed.password is not None:
         raise ValueError("Target URL must use http(s), include a host, and contain no credentials")
     if parsed.port is not None and not 1 <= parsed.port <= 65535:
         raise ValueError("Target URL port must be between 1 and 65535")
-    if any(ord(c) < 32 or c.isspace() for c in value) or "\\" in value:
+    if any(ord(c) < 32 or ord(c) == 127 or c.isspace() for c in value) or "\\" in value:
         raise ValueError("Target URL contains whitespace or a backslash")
     return urlunsplit(parsed._replace(fragment=""))
 
@@ -54,7 +55,9 @@ def candidates(base_url: str, wordlist: str | None = None) -> list[str]:
     if wordlist:
         entries = []
         with Path(wordlist).open(encoding="utf-8") as source:
-            for line in source:
+            for line in iter(lambda: source.readline(2049), ""):
+                if len(line.rstrip("\r\n")) > 2048:
+                    raise ValueError("Discovery wordlist exceeds candidate/line limits")
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
@@ -69,7 +72,7 @@ def candidates(base_url: str, wordlist: str | None = None) -> list[str]:
     urls = [base_url]
     for root in dict.fromkeys((origin + prefix, origin)):
         for path in paths:
-            candidate = validate_url(root.rstrip("/") + "/" + path)
+            candidate = validate_url(root.rstrip("/") + "/" + path + ("?" + parsed.query if parsed.query else ""))
             if candidate not in urls:
                 urls.append(candidate)
                 if len(urls) > MAX_CANDIDATES:
@@ -100,7 +103,7 @@ def _recognize(body: object, alias: str) -> tuple[bool, str]:
             code = (error.get("extensions") or {}).get("code") if isinstance(error.get("extensions", {}), dict) else None
             structured = (isinstance(locations, list) and any(isinstance(loc, dict) and "line" in loc and "column" in loc for loc in locations))
             specific = bool(re.search(r"cannot query field|unknown (field|operation)|syntax error|introspection.*(disabled|not allowed)|__typename", message))
-            if specific and (structured or code in {"GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED"}):
+            if specific and (structured or isinstance(code, str) and code in {"GRAPHQL_VALIDATION_FAILED", "GRAPHQL_PARSE_FAILED"}):
                 return True, "GraphQL validation response: " + error["message"]
         return False, "Unverified errors response (possibly authentication required)"
     return False, "No query-dependent GraphQL response"
@@ -118,17 +121,11 @@ def _probe(session: requests.Session, url: str, method: str, timeout: float, dea
             raise TimeoutError("Discovery time budget exhausted")
         response = None
         try:
-            response = session.request(method, url, json=payload if method == "POST" else None,
-                                       params=payload if method == "GET" else None, timeout=remaining,
-                                       allow_redirects=False, stream=True)
-            content = bytearray()
-            for chunk in response.iter_content(8192):
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("Discovery time budget exhausted")
-                if len(content) + len(chunk) > MAX_RESPONSE_BYTES:
-                    raise ValueError("Discovery response exceeds 1 MiB")
-                content.extend(chunk)
-            response._content = bytes(content)
+            with response_deadline(min(deadline, started + timeout)):
+                response = session.request(method, url, json=payload if method == "POST" else None,
+                                           params=payload if method == "GET" else None, timeout=remaining,
+                                           allow_redirects=False, stream=True)
+            request_utils.read_response(response, MAX_RESPONSE_BYTES, min(deadline, started + timeout))
             store = active_store()
             if store:
                 store.request(url, method, payload, response, time.monotonic() - started)
@@ -136,22 +133,27 @@ def _probe(session: requests.Session, url: str, method: str, timeout: float, dea
                 target = validate_url(urljoin(url, response.headers["Location"]))
                 if _origin(target) != _origin(original):
                     return Endpoint(url, method, response.status_code, False, "Cross-origin redirect was not followed")
+                if response.status_code == 303 and method == "POST":
+                    return Endpoint(url, method, response.status_code, False, "Redirect requires GET; POST endpoint was not confirmed")
                 url = target
                 continue
             try:
                 body = json.loads(response.content)
-            except (ValueError, UnicodeDecodeError):
+            except (ValueError, UnicodeDecodeError, RecursionError):
                 body = None
             confirmed, evidence = _recognize(body, alias)
             # A GraphQL-shaped unavailable response is still an unavailable endpoint.
             confirmed = confirmed and response.status_code in {200, 400, 401, 403, 422}
             return Endpoint(url, method, response.status_code, confirmed, evidence)
-        except (requests.RequestException, ValueError) as exc:
+        except (requests.RequestException, ValueError, TimeoutError) as exc:
             if store := active_store():
-                store.request(url, method, payload, elapsed=time.monotonic() - started, error=str(exc))
+                store.request(url, method, payload, response, elapsed=time.monotonic() - started, error=str(exc))
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Discovery time budget exhausted") from exc
             return Endpoint(url, method, response.status_code if response is not None else None, False, str(exc))
         finally:
             if response is not None:
+                cancel_deadline(response)
                 response.close()
     return Endpoint(url, method, None, False, "Redirect limit reached")
 
@@ -183,9 +185,16 @@ def discover(base_url: str, wordlist: str | None = None, timeout: float = 5, max
 def write_discovery(directory: str | Path, observations: list[Endpoint]) -> None:
     """Write a compact discovery report in addition to the canonical catalog."""
     store = active_store()
+    from graphqler.output.redaction import Redactor
+    redactor = store.redactor if store else Redactor()
+    redactor.capture()
+    for item in observations:
+        redactor.remember_url(item.url)
     report = {"schema_version": "graphqler/v1", "run_id": store.run_id if store else None,
               "endpoints": [asdict(item) for item in observations]}
+    report["endpoints"] = [{**item, "url": redactor.url(item["url"]), "evidence": redactor.text(item["evidence"])} for item in report["endpoints"]]
     if store:
         store.write_json(Path(directory) / "discovery.json", report)
     else:
-        Path(directory, "discovery.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        from graphqler.utils.file_utils import write_json_to_file
+        write_json_to_file(report, Path(directory) / "discovery.json")

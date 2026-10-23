@@ -65,6 +65,7 @@ SAVE_ENDPOINT_RESULTS = true  # Set false to skip writing per-endpoint result fi
 
 # For each request
 REQUEST_TIMEOUT = 120  # in seconds
+MAX_RESPONSE_BYTES = 16777216  # maximum wire and decoded HTTP response size
 VERIFY_TLS = true  # set false only when deliberately using an untrusted certificate
 TIME_BETWEEN_REQUESTS = 0.001  # in seconds
 

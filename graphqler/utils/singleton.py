@@ -23,6 +23,10 @@ class _SingletonCallable(Generic[_T]):
         """Clear the cached instance so the next call creates a fresh one."""
         self._instances.pop(self.__wrapped__, None)
 
+    def bind(self, instance: _T) -> None:
+        """Attach restored worker state to subsequent singleton lookups."""
+        self._instances[self.__wrapped__] = instance
+
 
 if TYPE_CHECKING:
     def singleton(myClass: type[_T]) -> type[_T]:

@@ -205,6 +205,8 @@ class LLMReporter:
     def _write_report(self, content: str) -> Path:
         """Write ``content`` to ``output_dir/report.md`` and return the path."""
         report_path = self.output_dir / config.LLM_REPORT_FILE_NAME
-        report_path.write_text(content, encoding="utf-8")
+        from graphqler.utils.file_utils import open_output
+        with open_output(report_path, encoding="utf-8") as report:
+            report.write(content)
         logger.info("LLMReporter: report written to %s", report_path)
         return report_path

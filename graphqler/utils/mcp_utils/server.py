@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import json
-import threading
 import traceback
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -27,6 +26,7 @@ except ImportError as exc:  # pragma: no cover
 
 from graphqler import config
 from graphqler.utils.cli_utils import is_compiled
+from graphqler.utils.config_handler import isolated_run, pipeline_lock
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -47,7 +47,7 @@ mcp = FastMCP(
 
 # Global lock to serialise tool execution: compile/fuzz mutate global config state,
 # so concurrent HTTP/SSE requests must not run simultaneously.
-_pipeline_lock = threading.Lock()
+_pipeline_lock = pipeline_lock
 
 
 # ---------------------------------------------------------------------------
@@ -65,11 +65,8 @@ def _reset_singletons() -> None:
 
     # Best-effort reset of additional singletons used by compile/fuzz pipeline.
     try:
-        from graphqler.utils.logging_utils import Logger
-
-        reset_fn = getattr(Logger, "reset", None)
-        if callable(reset_fn):
-            reset_fn()
+        from graphqler.utils.logging_utils import reset_loggers
+        reset_loggers()
     except ImportError:
         pass
 
@@ -112,9 +109,12 @@ def _capture(fn, *args, **kwargs):
     try:
         with redirect_stdout(buf):
             result = fn(*args, **kwargs)
-    except Exception:
+    except (Exception, SystemExit):
         error_text = traceback.format_exc()
-    return buf.getvalue(), result, error_text
+    from graphqler.output.redaction import Redactor
+    redactor = Redactor()
+    redactor.capture()
+    return redactor.text(buf.getvalue()), result, redactor.text(error_text)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +123,7 @@ def _capture(fn, *args, **kwargs):
 
 
 @mcp.tool()
+@isolated_run
 def compile(
     url: Annotated[str, "GraphQL API endpoint URL (e.g. http://localhost:4000/graphql)"],
     path: Annotated[str, "Output directory for compilation artifacts"] = "graphqler-output",
@@ -164,6 +165,7 @@ def compile(
 
 
 @mcp.tool()
+@isolated_run
 def fuzz(
     url: Annotated[str, "GraphQL API endpoint URL (must match the URL used during compile)"],
     path: Annotated[str, "Output directory that contains the compiled artifacts"] = "graphqler-output",
@@ -218,6 +220,7 @@ def fuzz(
 
 
 @mcp.tool()
+@isolated_run
 def run(
     url: Annotated[str, "GraphQL API endpoint URL (e.g. http://localhost:4000/graphql)"],
     path: Annotated[str, "Output directory for all artifacts"] = "graphqler-output",
@@ -247,6 +250,7 @@ def run(
     description="Compiled schema information (queries, mutations, objects, etc.) for the given output directory.",
     mime_type="application/json",
 )
+@isolated_run
 def get_schema_info(path: str) -> str:
     """Return compiled schema information as JSON for the given output directory."""
     if not is_compiled(path):
@@ -285,6 +289,7 @@ def get_schema_info(path: str) -> str:
     description="Fuzzing results and vulnerability findings for the given output directory.",
     mime_type="application/json",
 )
+@isolated_run
 def get_fuzzing_results(path: str) -> str:
     """Return fuzzing results and vulnerability findings as JSON for the given output directory."""
     stats_file = Path(path) / config.STATS_FILE_NAME

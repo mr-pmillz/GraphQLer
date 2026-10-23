@@ -20,6 +20,21 @@ from clairvoyance.cli import blind_introspection
 
 import asyncio
 import json
+import re
+
+
+def validate_schema_names(result: dict) -> None:
+    """Reject hostile schema identifiers before they become filenames or queries."""
+    pending = [result.get("data", {}).get("__schema", {})]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            name = value.get("name")
+            if name is not None and (not isinstance(name, str) or not re.fullmatch(r"[_A-Za-z][_0-9A-Za-z]*", name)):
+                raise ValueError("Introspection schema contains an invalid GraphQL name")
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
 
 
 class Compiler:
@@ -91,6 +106,10 @@ class Compiler:
         3. Run the parsers, storing files into objects / query / mutations
         4. Creating dependencies between objects and attaching methods (query/mutations) to objects
         """
+        from graphqler.utils.cli_utils import write_compilation_target
+        from graphqler.utils.file_utils import recreate_path
+        write_compilation_target(self.save_path, self.url, "running")
+        recreate_path(Path(self.save_path) / config.CHAINS_DIR_NAME)
         introspection_result = self.get_introspection_query_results()
         if introspection_result is None or introspection_result == {}:
             print("(C) Introspection query failed, trying clairvoyance")
@@ -99,8 +118,10 @@ class Compiler:
         if introspection_result is None or introspection_result == {}:
             raise SystemExit("(E) Couldn't get schema of the API. Exiting")
 
+        validate_schema_names(introspection_result)
         self.run_parsers_and_save(introspection_result)
         self.run_resolvers_and_save(introspection_result)
+        write_compilation_target(self.save_path, self.url, "completed")
 
     def get_introspection_query_results(self) -> dict:
         """Run the introspection query, grab results and output to file. Raises error if introspection query wasn't successful

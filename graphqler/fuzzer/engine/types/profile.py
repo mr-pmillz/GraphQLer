@@ -21,7 +21,7 @@ class RuntimeProfile:
         if self.auth_token:
             # Handle Bearer prefix if missing and not empty
             token = self.auth_token
-            if token and not token.startswith(("Bearer ", "Basic ")):
+            if len(token.split()) < 2:
                 token = f"Bearer {token}"
             h["Authorization"] = token
         return h

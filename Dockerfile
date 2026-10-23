@@ -10,6 +10,8 @@ COPY graphqler ./graphqler
 RUN uv build --wheel --build-constraints build-constraints.txt --require-hashes \
     && uv sync --locked --no-dev --no-install-project --extra mcp \
     && uv pip install --no-deps dist/*.whl
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    MPLCONFIGDIR=/tmp/graphqler-matplotlib \
+    XDG_CACHE_HOME=/tmp/graphqler-cache
 WORKDIR /work
 ENTRYPOINT ["/app/.venv/bin/graphqler"]

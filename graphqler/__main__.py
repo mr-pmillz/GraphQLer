@@ -4,6 +4,8 @@ Graphler - main start
 
 import argparse
 import importlib.metadata
+import re
+import sqlite3
 import sys
 from urllib.parse import urlsplit
 
@@ -13,8 +15,8 @@ from graphqler.discovery import discover, validate_url, write_discovery
 from graphqler.fuzzer import Fuzzer
 from graphqler.graph import GraphGenerator
 from graphqler.output import ResultStore, recording
-from graphqler.utils.cli_utils import is_compiled, set_auth_token_constant, set_idor_auth_token_constant
-from graphqler.utils.config_handler import does_config_file_exist_in_path, generate_new_config, parse_config, set_config, write_config_to_toml
+from graphqler.utils.cli_utils import compiled_target, is_compiled, set_auth_token_constant, set_idor_auth_token_constant
+from graphqler.utils.config_handler import does_config_file_exist_in_path, generate_new_config, parse_config, set_config, validate_config, write_config_to_toml
 from graphqler.utils.file_utils import get_or_create_directory
 from graphqler.utils.request_utils import reset_session
 from graphqler.utils.stats import Stats
@@ -24,7 +26,7 @@ def run_compile_mode(compiler: Compiler, path: str, url: str):
     """Runs the full compilation pipeline by delegating to compile-graph then compile-chains.
 
     Args:
-        compiler (Compiler): An instance of the Compiler class to use for compilation.  
+        compiler (Compiler): An instance of the Compiler class to use for compilation.
         path (str): Directory for all compilation outputs to be saved to
         url (str): URL of the target
     """
@@ -144,7 +146,11 @@ def _run_target(args: dict) -> ResultStore:
             _configure_target(args)
             _execute(args, store)
         except KeyboardInterrupt as exc:
-            store.finish("interrupted", "Interrupted by user")
+            try:
+                store.finish("interrupted", "Interrupted by user")
+            except Exception as export_error:
+                setattr(exc, "export_failed", True)
+                print(f"(E) {store.clean(str(export_error))}", file=sys.stderr)
             # The batch can publish completed and interrupted runs before exiting.
             setattr(exc, "result_store", store)
             raise
@@ -211,6 +217,8 @@ def _configure_target(args: dict) -> None:
         config.CUSTOM_HEADERS[name.strip()] = value.strip()
     if args.get("request_timeout") is not None:
         config.REQUEST_TIMEOUT = args["request_timeout"]
+    if args.get("max_response_bytes") is not None:
+        config.MAX_RESPONSE_BYTES = args["max_response_bytes"]
     if args.get("max_time") is not None:
         config.MAX_TIME = args["max_time"]
     if args.get("insecure"):
@@ -219,7 +227,7 @@ def _configure_target(args: dict) -> None:
     if args.get('auth'):
         # Multi-auth support: --auth profile=token or just --auth token (defaults to primary)
         for auth_entry in args['auth']:
-            if "=" in auth_entry:
+            if re.match(r"^[A-Za-z][A-Za-z0-9_-]*=[^=]", auth_entry):
                 profile_name, token = auth_entry.split("=", 1)
                 config.PROFILES[profile_name] = token
                 if profile_name == "primary":
@@ -297,6 +305,7 @@ def _configure_target(args: dict) -> None:
         config.DEBUG = True
 
     # Persist the final resolved config (file defaults + CLI overrides) back to disk
+    validate_config()
     write_config_to_toml(f"{args['path']}/{config.CONFIG_FILE_NAME}")
 
     reset_session()
@@ -306,8 +315,11 @@ def _configure_target(args: dict) -> None:
 
 def _execute(args: dict, store: ResultStore) -> None:
     """Run discovery or scanning after the output transaction has been initialized."""
-    if args['mode'] in {"fuzz", "single", "idor"} and not is_compiled(args['path']):
+    if args['mode'] in {"fuzz", "single", "idor", "compile-chains"} and not is_compiled(args['path']):
         raise ValueError("Compiled directory does not exist; run in compile mode first")
+    if args['mode'] in {"fuzz", "single", "idor"}:
+        args['url'] = compiled_target(args['path'], args['url'])
+        store.set_target(args['url'])
     should_discover = args['mode'] == "discover" or args.get('discover') or (
         args['mode'] in {"run", "compile", "compile-graph"} and urlsplit(args['url']).path in {"", "/"} and not args.get('no_discovery')
     )
@@ -317,7 +329,7 @@ def _execute(args: dict, store: ResultStore) -> None:
         write_discovery(args['path'], observations)
         matches = [item for item in observations if item.confirmed]
         for item in matches:
-            print(f"(D) GraphQL endpoint: {item.method} {item.url}")
+            print(f"(D) GraphQL endpoint: {item.method} {store.redactor.url(item.url)}")
         if args['mode'] == "discover":
             if not matches:
                 print("(D) No GraphQL endpoints confirmed; probe results are in the catalog")
@@ -342,6 +354,8 @@ def _execute(args: dict, store: ResultStore) -> None:
             run_compile_mode(compiler, config.OUTPUT_DIRECTORY, args['url'])
         if args['mode'] != "run":
             return
+    with store.connect() as db:
+        request_start = db.execute("SELECT COALESCE(MAX(id),0) FROM requests WHERE run_id=?", (store.run_id,)).fetchone()[0]
     if args['mode'] in {"run", "fuzz"}:
         fuzzer = Fuzzer(args['path'], args['url'])
         run_fuzz_mode(fuzzer, config.OUTPUT_DIRECTORY, args['url'])
@@ -354,6 +368,10 @@ def _execute(args: dict, store: ResultStore) -> None:
         run_single_mode(args['path'], args['url'], args['node'])
     else:
         raise ValueError(f"Unknown mode: {args['mode']}")
+    with store.connect() as db:
+        requests = db.execute("SELECT COUNT(*), SUM(status_code IS NOT NULL AND error IS NULL) FROM requests WHERE run_id=? AND id>?", (store.run_id, request_start)).fetchone()
+        if requests[0] and not requests[1]:
+            raise RuntimeError("Scan failed: no usable HTTP responses received; inspect recorded transport errors")
 
 
 # If running as a CLI
@@ -420,6 +438,7 @@ def cli():
     parser.add_argument("--header", "-H", action="append", help="custom HTTP header, repeated as 'Name: value'")
     parser.add_argument("--insecure", action="store_true", help="disable TLS certificate verification, including with an intercepting proxy")
     parser.add_argument("--request-timeout", type=float, help="timeout per HTTP request in seconds")
+    parser.add_argument("--max-response-bytes", type=int, help="maximum wire and decoded response size (default: 16777216 bytes)")
     parser.add_argument("--max-time", type=float, help="maximum fuzzing time per target in seconds")
     parser.add_argument("--node", help="node to run (only used in single mode)", required=False)
     parser.add_argument("--plugins-path", help="path to plugins directory", required=False)
@@ -457,8 +476,11 @@ def cli():
         args_as_dict['path'] = config.OUTPUT_DIRECTORY
     try:
         sys.exit(main(args_as_dict))
-    except (ValueError, RuntimeError, TimeoutError, OSError) as exc:
-        print(f"(E) {exc}", file=sys.stderr)
+    except (ValueError, RuntimeError, TimeoutError, OSError, sqlite3.Error) as exc:
+        from graphqler.output.redaction import Redactor
+        redactor = Redactor()
+        redactor.capture()
+        print(f"(E) {redactor.text(str(exc))}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
         sys.exit(130)

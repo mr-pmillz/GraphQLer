@@ -2,7 +2,7 @@ import logging
 from graphqler import config
 from pathlib import Path
 from graphqler.utils.singleton import singleton
-from graphqler.utils.file_utils import initialize_file
+from graphqler.utils.file_utils import get_or_create_directory, get_or_create_file, initialize_file
 
 
 def reset_loggers() -> None:
@@ -42,7 +42,7 @@ class Logger:
         """
         # create the log file if it doesn't exist
         if not self.fuzzer_log_path.exists():
-            self.fuzzer_log_path.parent.mkdir(parents=True, exist_ok=True)
+            get_or_create_directory(self.fuzzer_log_path.parent)
             initialize_file(self.fuzzer_log_path)
 
         # create the logger if it doesn't exist
@@ -60,7 +60,7 @@ class Logger:
         """
         # create the log file if it doesn't exist
         if not self.detector_log_path.exists():
-            self.detector_log_path.parent.mkdir(parents=True, exist_ok=True)
+            get_or_create_directory(self.detector_log_path.parent)
             initialize_file(self.detector_log_path)
 
         # create the logger if it doesn't exist
@@ -78,7 +78,7 @@ class Logger:
         """
         # create the log file if it doesn't exist
         if not self.compiler_log_path.exists():
-            self.compiler_log_path.parent.mkdir(parents=True, exist_ok=True)
+            get_or_create_directory(self.compiler_log_path.parent)
             initialize_file(self.compiler_log_path)
 
         # create the logger if it doesn't exist
@@ -96,7 +96,7 @@ class Logger:
         """
         # create the log file if it doesn't exist
         if not self.idor_log_path.exists():
-            self.idor_log_path.parent.mkdir(parents=True, exist_ok=True)
+            get_or_create_directory(self.idor_log_path.parent)
             initialize_file(self.idor_log_path)
 
         # create the logger if it doesn't exist
@@ -119,7 +119,7 @@ class Logger:
             logging.Logger: A logger configured to write to the chain's log file.
         """
         chain_log_dir = Path(config.OUTPUT_DIRECTORY) / config.CHAIN_LOGS_DIR_NAME / chain_id
-        chain_log_dir.mkdir(parents=True, exist_ok=True)
+        get_or_create_directory(chain_log_dir)
         chain_log_path = chain_log_dir / "fuzzer.log"
         if not chain_log_path.exists():
             initialize_file(chain_log_path)
@@ -135,6 +135,7 @@ class Logger:
         Returns:
             logging.Logger: The logger returned
         """
+        file_path = get_or_create_file(Path(file_path))
         logger = logging.getLogger(name)
 
         # Avoid adding duplicate handlers when the same named logger is requested again

@@ -13,10 +13,12 @@ jobs:
   verify:
     if: github.repository == 'mr-pmillz/GraphQLer'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: '0.13.5'
@@ -50,6 +52,7 @@ jobs:
   image:
     needs: verify
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -57,6 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.38.1
@@ -85,6 +89,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [verify, image]
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -97,9 +102,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" = "$EXPECTED_SHA"
+          (cd dist && sha256sum --check --strict SHA256SUMS)
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/* --clobber
+            existing=$(mktemp -d "$RUNNER_TEMP/graphqler-release.XXXXXXXX")
+            gh release download "$RELEASE_TAG" --dir "$existing"
+            for asset in dist/*; do
+              if ! cmp --silent -- "$asset" "$existing/${asset##*/}"; then
+                echo 'Existing release assets differ; publish changes under a new version.' >&2
+                exit 1
+              fi
+            done
           else
-            gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes --title "$RELEASE_TAG"
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --target "$EXPECTED_SHA" --generate-notes --title "$RELEASE_TAG"
           fi

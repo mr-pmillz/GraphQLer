@@ -65,7 +65,9 @@ class ChainGenerator:
             save_path (str): Root output directory.
         """
         chains_dir = Path(save_path) / config.CHAINS_DIR_NAME
-        chains_dir.mkdir(parents=True, exist_ok=True)
+        from graphqler.output.files import atomic_writer
+        from graphqler.utils.file_utils import get_or_create_directory
+        get_or_create_directory(chains_dir)
 
         for strategy, chains in self._results:
             data = []
@@ -77,7 +79,7 @@ class ChainGenerator:
                     "reason": chain.reason,
                 }
                 data.append(entry)
-            with open(chains_dir / strategy.file_name, "w") as f:
+            with atomic_writer((chains_dir / strategy.file_name).absolute(), Path(save_path).resolve()) as f:
                 yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     def load_from_yaml(self, save_path: str, graph: networkx.DiGraph) -> list[Chain]:

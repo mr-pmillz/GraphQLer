@@ -130,6 +130,7 @@ def draw_graph(graph: networkx.DiGraph, save_path: Path):
     ax.legend(handles=legend_handles, loc='upper right', title='Node Types', fontsize=8, title_fontsize=9)
 
     # Save the figure
-    plt.savefig(save_path, format="png", dpi=1000, bbox_inches='tight')
-    plt.savefig(save_path.with_suffix('.pdf'), format='pdf', bbox_inches='tight')
+    from graphqler.utils.file_utils import get_or_create_file
+    plt.savefig(get_or_create_file(save_path), format="png", dpi=1000, bbox_inches='tight')
+    plt.savefig(get_or_create_file(save_path.with_suffix('.pdf')), format='pdf', bbox_inches='tight')
     plt.close()

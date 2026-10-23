@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import copy
 import multiprocessing
 import queue as queue_module
 import sys
@@ -19,11 +20,14 @@ import typing
 from contextlib import nullcontext
 from pathlib import Path
 
+import cloudpickle
+
 from graphqler import config
 from graphqler.chains import Chain, ChainGenerator, ChainStep
 from graphqler.graph import GraphGenerator, Node
 from graphqler.output import active_store, cataloged, recording
 from graphqler.utils.api import API
+from graphqler.utils.file_utils import get_or_create_directory, get_or_create_file, open_output
 from graphqler.utils.logging_utils import Logger
 from graphqler.utils.objects_bucket import ObjectsBucket
 from graphqler.utils.stats import Stats
@@ -36,6 +40,19 @@ from .engine.types.profile import RuntimeProfile
 from .reporters import LLMReporter
 
 
+def _spawned_worker(serialized: bytes, configuration: dict, queue) -> None:
+    """Restore trusted parent state under spawn/forkserver, including live config."""
+    for name, value in configuration.items():
+        setattr(config, name, value)
+    fuzzer, target = cloudpickle.loads(serialized)
+    if hasattr(fuzzer, "logger"):
+        fuzzer.logger = Logger().get_fuzzer_logger()
+    for singleton, attribute in ((Stats, "stats"), (ObjectsBucket, "objects_bucket"), (FEngine, "fengine")):
+        if hasattr(fuzzer, attribute):
+            getattr(singleton, "bind")(getattr(fuzzer, attribute))
+    fuzzer._worker_entry(target, queue)
+
+
 class Fuzzer:
     def __init__(self, save_path: str, url: str, objects_bucket: ObjectsBucket | None = None):
         """Initializes the fuzzer, reading information from the compiled files
@@ -44,11 +61,16 @@ class Fuzzer:
             save_path (str): Save directory path
             url (str): URL for graphql introspection query to hit
         """
+        from graphqler.utils.cli_utils import compiled_target
+        url = compiled_target(save_path, url)
         self.save_path = save_path
         self.output_store = active_store()
         self.url = url
         self.logger = Logger().get_fuzzer_logger()
         self.stats = Stats()
+        expected_stats = Path(save_path) / config.STATS_FILE_NAME
+        if self.stats.file_path.resolve() != expected_stats.resolve() or not hasattr(self.stats, "json_file_path"):
+            self.stats.set_file_paths(save_path)
         self.api = API(url, save_path)
 
         self.dependency_graph = GraphGenerator(save_path).get_dependency_graph()
@@ -67,7 +89,7 @@ class Fuzzer:
             "primary": RuntimeProfile(name="primary", auth_token=config.AUTHORIZATION),
             "secondary": RuntimeProfile(name="secondary", auth_token=config.IDOR_SECONDARY_AUTH),
             # post_delete uses the primary auth token — UAF tests same-user access after deletion
-            "post_delete": RuntimeProfile(name="post_delete", auth_token=config.AUTHORIZATION),
+            "post_delete": RuntimeProfile(name="post_delete", auth_token=config.AUTHORIZATION, headers=dict(config.CUSTOM_HEADERS)),
         }
         # Add any other profiles defined in config.PROFILES
         for name, profile_data in getattr(config, "PROFILES", {}).items():
@@ -112,23 +134,39 @@ class Fuzzer:
         """Bind output in spawned processes and report completion or a bounded error."""
         with recording(self.output_store) if self.output_store else nullcontext():
             try:
+                from graphqler.utils.request_utils import reset_session
+                reset_session()
                 target(queue)
             except BaseException as exc:
-                queue.put((False, f"{type(exc).__name__}: {exc}"[:2000]))
+                queue.put((False, f"{type(exc).__name__}: {exc}".encode("utf-8")[:2000].decode("utf-8", errors="replace")))
             else:
                 queue.put((True, ""))
 
     def _run_worker(self, target):
         """Wait for execution, join terminated processes, and propagate failures to the caller."""
         self.output_store = active_store()
+        request_start = 0
+        if self.output_store:
+            with self.output_store.connect() as db:
+                request_start = db.execute("SELECT COALESCE(MAX(id),0) FROM requests WHERE run_id=?", (self.output_store.run_id,)).fetchone()[0]
         queue = multiprocessing.Queue()
         if config.DEBUG:
             p = threading.Thread(target=self._worker_entry, args=(target, queue))
             p.daemon = True
         else:
-            p = multiprocessing.Process(target=self._worker_entry, args=(target, queue))
-        p.start()
+            if multiprocessing.get_start_method() == "fork":
+                p = multiprocessing.Process(target=self._worker_entry, args=(target, queue))
+            else:
+                try:
+                    configuration = {key: copy.deepcopy(value) for key, value in vars(config).items() if key.isupper()}
+                    serialized = cloudpickle.dumps((self, target))
+                except BaseException:
+                    queue.close()
+                    queue.join_thread()
+                    raise
+                p = multiprocessing.Process(target=_spawned_worker, args=(serialized, configuration, queue))
         try:
+            p.start()
             # Debugging runs in a thread so breakpoints work; never finalize results
             # while a thread can still mutate them.
             p.join(None if config.DEBUG else config.MAX_TIME)
@@ -148,6 +186,12 @@ class Fuzzer:
                 raise RuntimeError("Fuzzer worker exited without a completion report") from exc
             if not success:
                 raise RuntimeError(error)
+            if self.output_store:
+                with self.output_store.connect() as db:
+                    total, responses = db.execute("SELECT COUNT(*),SUM(status_code IS NOT NULL AND error IS NULL) FROM requests WHERE run_id=? AND id>?",
+                                                  (self.output_store.run_id, request_start)).fetchone()
+                if total and not responses:
+                    raise RuntimeError("Fuzzing failed: no usable HTTP responses received; inspect recorded transport errors")
         finally:
             if isinstance(p, multiprocessing.Process) and p.is_alive():
                 p.terminate()
@@ -157,6 +201,8 @@ class Fuzzer:
                     p.join()
             queue.close()
             queue.join_thread()
+            if isinstance(p, multiprocessing.Process) and p.pid is not None:
+                p.close()
 
     @cataloged("chain")
     def run_chain(self, chain: Chain) -> None:
@@ -366,7 +412,7 @@ class Fuzzer:
 
         # --- per-chain log setup ---
         chain_log_dir = Path(config.OUTPUT_DIRECTORY) / config.CHAIN_LOGS_DIR_NAME / str(len(chain.steps)) / chain.id
-        chain_log_dir.mkdir(parents=True, exist_ok=True)
+        get_or_create_directory(chain_log_dir)
 
         # Write chain.txt with a human-readable description of the chain path
         chain_path_str = " -> ".join(repr(step) for step in chain.steps)
@@ -378,11 +424,12 @@ class Fuzzer:
             chain_txt_lines.append(f"Confidence: {chain.confidence:.4f}")
         if chain.reason:
             chain_txt_lines.append(f"Reason   : {chain.reason}")
-        (chain_log_dir / "chain.txt").write_text("\n".join(chain_txt_lines) + "\n")
+        with open_output(chain_log_dir / "chain.txt") as description:
+            description.write("\n".join(chain_txt_lines) + "\n")
 
         # Temporarily add a FileHandler to the 'fuzzer' logger so that all log records
         # produced during this chain (including from FEngine) land in the chain's fuzzer.log.
-        chain_log_path = chain_log_dir / "fuzzer.log"
+        chain_log_path = get_or_create_file(chain_log_dir / "fuzzer.log")
         chain_file_handler = logging.FileHandler(chain_log_path)
         formatter = logging.Formatter("[%(levelname)s][%(asctime)s][%(name)s]:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         chain_file_handler.setFormatter(formatter)
@@ -414,7 +461,7 @@ class Fuzzer:
                 if not profile:
                     self.logger.error(f"Profile '{step.profile_name}' not found — skipping step")
                     continue
-                if step.profile_name != "primary" and not profile.auth_token:
+                if step.profile_name not in {"primary", "post_delete"} and not profile.auth_token and not profile.headers:
                     self.logger.warning(
                         f"Profile '{step.profile_name}' has no auth token configured — aborting chain "
                         f"(set IDOR_SECONDARY_AUTH in your config to enable IDOR chain testing)"
@@ -428,10 +475,7 @@ class Fuzzer:
 
                     if config.DEBUG:
                         snapshot_empty = pre_delete_snapshot is None or pre_delete_snapshot.is_empty()
-                        snapshot_objects = {} if pre_delete_snapshot is None else dict(pre_delete_snapshot.objects)
-                        print(f"[UAF-DEBUG] post_delete step: node={node.name}")
-                        print(f"[UAF-DEBUG]   snapshot non-empty: {not snapshot_empty}  objects={snapshot_objects}")
-                        print(f"[UAF-DEBUG]   token: {profile.auth_token!r}")
+                        self.logger.debug("Post-delete step: node=%s, snapshot_available=%s", node.name, not snapshot_empty)
 
                     self.logger.info(f"[post_delete][test] Running node with post-delete profile: {node}")
                     _response, result = self.fengine.run_minimal_payload_with_profile(
@@ -439,8 +483,7 @@ class Fuzzer:
                     )
 
                     if config.DEBUG:
-                        node_data = result.data.get(node.name) if result.data else None
-                        print(f"[UAF-DEBUG]   result.success={result.success}  node_data={node_data!r}")
+                        self.logger.debug("Post-delete result: success=%s", result.success)
 
                     results.append((step, result))
                 elif step.profile_name != "primary":
@@ -456,7 +499,7 @@ class Fuzzer:
                     if next_step is not None and next_step.profile_name == "post_delete":
                         pre_delete_snapshot = fresh_bucket.clone()
                         if config.DEBUG:
-                            print(f"[UAF-DEBUG] Snapshotted bucket before DELETE step '{node.name}': {dict(pre_delete_snapshot.objects)}")
+                            self.logger.debug("Saved bucket before DELETE step: %s", node.name)
 
                     self.logger.info(f"[chain] Running node: {node}")
                     node_start = time.time()

@@ -10,6 +10,7 @@ Each test gets its own output directory that is deleted in ``tearDown``.
 """
 
 import os
+import json
 import shutil
 import subprocess
 import unittest
@@ -152,11 +153,13 @@ class TestCLIModes(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"compile-chains failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}")
         self._assert_chains_exist()
 
-    def test_compile_chains_on_empty_directory_exits_cleanly(self):
-        """compile-chains with no prior graph handles an empty graph without crashing."""
+    def test_compile_chains_on_empty_directory_reports_failure(self):
+        """Missing compilation is a failed operation with a usable manifest."""
         result = self._compile_chains()
-        # Should exit 0 (it prints a warning and returns early, not sys.exit(1))
-        self.assertEqual(result.returncode, 0, f"compile-chains crashed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        with open(os.path.join(self.path, "manifest.json")) as source:
+            self.assertEqual(json.load(source)["status"], "failed")
+        self.assertNotIn("Traceback", result.stderr)
 
     # ── full compile mode ─────────────────────────────────────────────────────
 

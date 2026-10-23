@@ -33,7 +33,7 @@ def _make_compiled_path(tmp_dir: str) -> None:
         full = os.path.join(tmp_dir, fname)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, "w") as f:
-            f.write("")
+            f.write("{}\n")
 
 
 # ---------------------------------------------------------------------------

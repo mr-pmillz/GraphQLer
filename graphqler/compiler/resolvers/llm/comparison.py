@@ -74,9 +74,9 @@ class ResolverComparison:
             str: Absolute path of the written file.
         """
         dest = Path(output_dir) / COMPARISON_FILE_NAME
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        from graphqler.utils.file_utils import open_output
         document = self.build()
-        with open(dest, "w") as f:
+        with open_output(dest, "w") as f:
             json.dump(document, f, indent=2)
         logger.info(f"Resolver comparison saved to {dest}")
         summary = document["summary"]

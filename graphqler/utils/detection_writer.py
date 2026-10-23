@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from graphqler import config
+from graphqler.utils.file_utils import get_or_create_directory, open_output
 
 if TYPE_CHECKING:
     from graphqler.chains.chain import Chain, ChainStep
@@ -34,7 +35,7 @@ def _fmt_response(graphql_response: object) -> str:
 
 def _detection_dir(vuln_name: str, node_name: str) -> Path:
     d = Path(config.OUTPUT_DIRECTORY) / config.DETECTIONS_DIR_NAME / _safe_name(vuln_name) / _safe_name(node_name)
-    d.mkdir(parents=True, exist_ok=True)
+    get_or_create_directory(d)
     return d
 
 
@@ -62,7 +63,7 @@ def write_from_detector(
     response_str = _fmt_response(graphql_response)
 
     # raw_log.txt — append one entry per detection event
-    with open(d / "raw_log.txt", "a") as f:
+    with open_output(d / "raw_log.txt", "a") as f:
         f.write(f"[DETECTION] {vuln_name}\n")
         f.write(f"[NODE] {node_name}\n")
         f.write(f"[STATUS] {status_str}\n")
@@ -72,7 +73,7 @@ def write_from_detector(
         f.write("\n" + "=" * 60 + "\n\n")
 
     # summary.txt — overwrite with latest finding
-    with open(d / "summary.txt", "w") as f:
+    with open_output(d / "summary.txt", "w") as f:
         f.write("=== Detection Summary ===\n")
         f.write(f"Vulnerability : {vuln_name}\n")
         f.write(f"Status        : {status_str}\n")
@@ -105,7 +106,7 @@ def write_from_chain(
     final_status = detected_result.status_code
 
     # raw_log.txt — append one entry per chain execution that fires detection
-    with open(d / "raw_log.txt", "a") as f:
+    with open_output(d / "raw_log.txt", "a") as f:
         f.write(f"[DETECTION] {vuln_name}\n")
         f.write(f"[CHAIN] {chain!r}\n")
         if chain.reason:
@@ -124,7 +125,7 @@ def write_from_chain(
         f.write("=" * 60 + "\n\n")
 
     # summary.txt — overwrite with latest chain detection
-    with open(d / "summary.txt", "w") as f:
+    with open_output(d / "summary.txt", "w") as f:
         f.write("=== Detection Summary ===\n")
         f.write(f"Vulnerability : {vuln_name}\n")
         f.write("Status        : POTENTIAL\n")

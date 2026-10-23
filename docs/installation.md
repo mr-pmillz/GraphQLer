@@ -39,7 +39,8 @@ tags. Use a registry digest when you need immutable deployment inputs:
 
 ```sh
 # Replace DIGEST with the SHA-256 digest from the published image.
-docker run --rm -v "$PWD/results:/work/results" \
+mkdir -p results
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/results:/work/results" \
   ghcr.io/mr-pmillz/graphqler@sha256:DIGEST \
   --mode run --url https://example.com/ --output /work/results
 ```
@@ -48,6 +49,8 @@ The entry point is the installed `graphqler` command; the working directory is
 `/work`. It starts directly without resolving or downloading packages. Mount your
 output directory to preserve results. `--proxy` works for both HTTP and HTTPS;
 use `--insecure` only if you intentionally bypass certificate verification.
+New catalogs and reports are private to their owner. On Linux, `--user` gives
+mounted output files your host user ID so you can read them after the container exits.
 
 ## Development and verification
 
