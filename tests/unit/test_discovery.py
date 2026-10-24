@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from graphqler import config
-from graphqler.discovery import _recognize, candidates, discover
+from graphqler.discovery import DEFAULT_PATHS, MAX_CANDIDATES, _recognize, candidates, discover
 from graphqler.output import ResultStore, recording
 
 
@@ -44,7 +44,9 @@ def server(monkeypatch):
                 self.end_headers()
                 return
             alias = re.search(r"(graphqler_[a-f0-9]+):", query)
-            valid = path in {"/graphql/v2", "/v1/graphql", "/app/graphql"} or (path == "/get-only" and self.command == "GET")
+            valid = path in {"/graphql/v2", "/v1/graphql", "/app/graphql", "/api/v4/graphql"} or (
+                path in {"/get-only", "/api/v4/playground"} and self.command == "GET"
+            )
             if valid and alias:
                 body = {"data": {alias.group(1): "Query"}}
                 status = 200
@@ -78,12 +80,27 @@ def test_discovery_records_all_probes_and_finds_versioned_paths(server, tmp_path
     with recording(store):
         matches = discover(base)
     store.finish()
-    assert {item.url for item in matches if item.confirmed} >= {base + "/graphql/v2", base + "/v1/graphql"}
+    assert {item.url for item in matches if item.confirmed} >= {
+        base + "/graphql/v2", base + "/v1/graphql", base + "/api/v4/graphql", base + "/api/v4/playground",
+    }
     assert all(auth == "Bearer discovery-token" for _, _, auth in observed)
     with store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == len(observed)
         assert db.execute("SELECT COUNT(*) FROM endpoints WHERE confirmed=0").fetchone()[0] > 0
     assert "discovery-token" not in (tmp_path / "results.jsonl").read_text()
+
+
+def test_default_paths_cover_versioned_apis_and_ides_without_exceeding_prefix_budget():
+    expected = {"graphql", "graphiql", "playground", "console", "explorer", "api/graphql", "api/graphiql"}
+    for version in range(1, 5):
+        for route in ("graphql", "graphiql", "playground"):
+            expected.update((f"v{version}/{route}", f"api/v{version}/{route}"))
+    assert expected <= set(DEFAULT_PATHS)
+    assert len(DEFAULT_PATHS) == len(set(DEFAULT_PATHS))
+    urls = candidates("https://example.test/app?key=value")
+    assert len(urls) <= MAX_CANDIDATES
+    assert urls[:3] == ["https://example.test/app?key=value", "https://example.test/app/graphql?key=value", "https://example.test/graphql?key=value"]
+    assert "https://example.test/app/api/v4/graphiql?key=value" in urls
 
 
 def test_wordlist_redirect_get_and_wildcard_behavior(server, tmp_path):

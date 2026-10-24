@@ -12,10 +12,13 @@ Each test gets its own output directory that is deleted in ``tearDown``.
 import os
 import json
 import shutil
+import sqlite3
 import subprocess
+import sys
 import unittest
 
 from tests.e2e.utils.run_api import run_node_project, wait_for_server
+from tests.utils.process import run_process
 
 # Use a port that does not clash with any e2e test server (all use 4000-4008).
 PORT = 4020
@@ -25,12 +28,15 @@ API_PATH = "sample-graphql-apis/food-delivery-api"
 
 def _run_cli(path: str, mode: str, url: str | None = None, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
     """Invoke ``python -m graphqler`` and return the completed process."""
-    cmd = ["uv", "run", "python", "-m", "graphqler", "--mode", mode, "--path", path]
+    # Reuse pytest's interpreter; nested `uv run` can resync its environment.
+    # These tests cover CLI modes and transport; detector behavior has its own tests.
+    cmd = [sys.executable, "-m", "graphqler", "--mode", mode, "--path", path,
+           "--no-detections", "--max-time", "90", "--request-timeout", "5", "--max-iterations", "1"]
     if url:
         cmd += ["--url", url]
     if extra_args:
         cmd += extra_args
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    return run_process(cmd, timeout=120)
 
 
 class TestCLIModes(unittest.TestCase):
@@ -353,6 +359,8 @@ class TestSubscriptionSupport(unittest.TestCase):
         # Then fuzz with subscriptions enabled
         fuzz_result = _run_cli_sub(self.path, "fuzz", extra_args=["--subscriptions"])
         self.assertEqual(fuzz_result.returncode, 0, f"fuzz --subscriptions failed:\nSTDOUT: {fuzz_result.stdout}\nSTDERR: {fuzz_result.stderr}")
+        with sqlite3.connect(os.path.join(self.path, "results.sqlite3")) as db:
+            self.assertGreater(db.execute("SELECT COUNT(*) FROM requests WHERE method='WEBSOCKET' AND error IS NULL").fetchone()[0], 0)
 
     def test_fuzz_without_subscriptions_flag_still_works(self):
         """Without --subscriptions, subscription nodes are skipped and fuzzing should succeed."""
@@ -361,3 +369,6 @@ class TestSubscriptionSupport(unittest.TestCase):
 
         fuzz_result = _run_cli_sub(self.path, "fuzz")
         self.assertEqual(fuzz_result.returncode, 0, f"fuzz (no subscriptions) failed:\nSTDOUT: {fuzz_result.stdout}\nSTDERR: {fuzz_result.stderr}")
+        with sqlite3.connect(os.path.join(self.path, "results.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM requests WHERE method='WEBSOCKET'").fetchone()[0], 0)
+            self.assertGreater(db.execute("SELECT COUNT(*) FROM results WHERE success=1").fetchone()[0], 0)

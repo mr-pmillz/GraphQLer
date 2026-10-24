@@ -1,27 +1,8 @@
-# Ignore virtual environment directories
-venv
-.env
-.venv
-
-# Ignore Python cache files
-__pycache__
-*.pyc
-*.pyo
-
-# Ignore other common directories/files
-.git
-.gitignore
-.DS_Store
-graphqler-output
-ci-test-*
-*.sqlite3
-*.sqlite3-*
-*.log
-.env.*
-.agents
-.codex
-dist
-site
-sample-graphql-apis
-tests
-benchmark
+# Only verified distributions are needed to build the runtime image.
+**
+!Dockerfile
+!dist/
+!dist/*.whl
+!dist/*.tar.gz
+!dist/requirements.txt
+!dist/SHA256SUMS

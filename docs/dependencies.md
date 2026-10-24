@@ -4,6 +4,8 @@ Versions were checked against upstream releases on 2026-10-23. Python runtime,
 development, docs, and optional MCP dependencies have exact constraints in
 `pyproject.toml`; `uv.lock` records resolved versions and artifact hashes. Build
 dependencies have a separate hash-checked lock in `build-constraints.txt`.
+Git versioning uses Hatch VCS 0.5.0 and setuptools-scm 10.3.4, checked on
+2026-10-24 and pinned alongside Hatchling in the build requirements and hash lock.
 
 The runtime remains Python 3.12. CI and containers use Python 3.12.15 and uv
 0.13.5. Docker base images, the uv build stage, and the CI BuildKit image use

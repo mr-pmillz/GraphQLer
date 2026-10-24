@@ -80,6 +80,7 @@ class Stats :
         self.dep_retry_total = 0
         self.dep_retry_completed = 0
         self.pickle_save_path = Path(config.OUTPUT_DIRECTORY) / config.SERIALIZED_DIR_NAME / config.STATS_PICKLE_FILE_NAME
+        self._last_snapshot = time.monotonic()
 
     def load(self) -> Self:
         """Loads the stats from the pickle file"""
@@ -98,7 +99,6 @@ class Stats :
             self.successful_nodes[key_name] += 1
         else:
             self.successful_nodes[key_name] = 1
-        self.save()
 
     def add_failed_node(self, node: Node):
         """Adds a new failed node to the internal failed stats
@@ -112,7 +112,6 @@ class Stats :
             self.failed_nodes[key_name] += 1
         else:
             self.failed_nodes[key_name] = 1
-        self.save()
 
     def add_http_status_code(self, payload_name: str, status_code: int | None):
         """Adds the http status code to stats
@@ -131,7 +130,6 @@ class Stats :
                 self.http_status_codes[status_code_str][payload_name] = 1
         else:
             self.http_status_codes[status_code_str] = {payload_name: 1}
-        self.save()
 
     def set_file_paths(self, working_dir: str):
         """
@@ -334,6 +332,7 @@ class Stats :
                 self.unique_responses[str(result.graphql_response)].append(node.name)
         else:
             self.unique_responses[str(result.graphql_response)] = [node.name]
+        self.save(force=False)
 
     def get_number_of_successful_mutations_and_queries(self) -> tuple[int, int]:
         """Returns the number of successful mutations and queries"""
@@ -377,9 +376,14 @@ class Stats :
             print(self.get_formatted_vulnerabilites())
         print("---------------------------------------------------------")
 
-    def save(self):
-        """Saves the stats into the stats text file
+    def save(self, *, force: bool = True):
+        """Checkpoint legacy reports at most once a second; explicit saves always flush.
+
+        Each observation is already committed to SQLite. Rewriting every historical
+        response and pickle for every counter update makes larger scans quadratic.
         """
+        if not force and time.monotonic() - self._last_snapshot < 1.0:
+            return
         covered, total, coverage_frac = self.get_coverage_rate()
         failed, _, negative_frac = self.get_negative_coverage_rate()
         with open_output(self.file_path, "w") as f:
@@ -412,6 +416,7 @@ class Stats :
 
         # Saves the pickle file as well
         self.__save_pickle()
+        self._last_snapshot = time.monotonic()
 
     def save_json(self):
         """Saves a machine-readable JSON report alongside the text stats file"""
@@ -572,6 +577,7 @@ class Stats :
                 with open(self.pickle_save_path, "rb") as file:
                     loaded_stats = pickle.load(file)
                     self.__dict__.update(loaded_stats.__dict__)
+                    self._last_snapshot = time.monotonic()
             except (EOFError, Exception):
                 # File may be empty or corrupt (e.g. child process killed mid-write); skip load.
                 pass

@@ -15,11 +15,30 @@ from graphqler.output import active_store
 from graphqler.utils import request_utils
 from graphqler.utils.http_deadline import cancel_deadline, response_deadline
 
-DEFAULT_PATHS = (
+_COMMON_PATHS = (
     "graphql", "graphql/v1", "graphql/v2", "v1/graphql", "v2/graphql", "api/graphql",
     "api/v1/graphql", "api/v2/graphql", "api/graphql/v1", "api/graphql/v2", "graphql/v3",
     "v3/graphql", "gql", "query", "api", "graphiql", "graphql/", "graphql.php",
+    "api/graphiql", "playground", "api/playground", "console", "explorer",
 )
+# Keep common routes first so automatic discovery can stop after an early match.
+_VERSIONED_PATHS = tuple(
+    path
+    for version in range(1, 5)
+    for route in ("graphql", "graphiql", "playground")
+    for path in (f"v{version}/{route}", f"api/v{version}/{route}", f"{route}/v{version}", f"api/{route}/v{version}")
+)
+DEFAULT_PATHS = tuple(dict.fromkeys((
+    *_COMMON_PATHS, *_VERSIONED_PATHS,
+    "api/console", "api/explorer", "graphql/console", "graphql/explorer", "graphql/playground", "graphql/graphiql",
+    "graphql/api", "graphql/endpoint", "graphql.json", "graphql/index.php", "graphql-api", "graphqlapi",
+    "api/gql", "api/query", "api/graphql.php", "api/graphql.json", "api/graphql/", "gql/", "query/",
+    "v1beta1/graphql", "v1/relay", "v1beta1/relay", "graphql/relay", "api/relay", "relay",
+    "api/v1", "api/v2", "api/v3", "api/v4", "api/admin/graphql", "admin/api/graphql", "admin/graphql",
+    "public/graphql", "private/graphql", "internal/graphql", "api/public/graphql", "api/private/graphql",
+    "api/internal/graphql", "graphql/public", "graphql/private", "graphql/internal", "graphql-gateway", "gateway/graphql",
+    "api/gateway/graphql", "graphql/query", "api/graphql/query", "wp/graphql", "wp-json/graphql",
+)))
 MAX_CANDIDATES = 256
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -70,8 +89,8 @@ def candidates(base_url: str, wordlist: str | None = None) -> list[str]:
     origin = urlunsplit(parsed._replace(path="", query="", fragment=""))
     prefix = parsed.path.rstrip("/")
     urls = [base_url]
-    for root in dict.fromkeys((origin + prefix, origin)):
-        for path in paths:
+    for path in paths:
+        for root in dict.fromkeys((origin + prefix, origin)):
             candidate = validate_url(root.rstrip("/") + "/" + path + ("?" + parsed.query if parsed.query else ""))
             if candidate not in urls:
                 urls.append(candidate)

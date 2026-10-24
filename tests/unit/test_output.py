@@ -67,6 +67,56 @@ def test_observations_and_findings_are_durable_and_monotonic(store):
     assert all(item["run_id"] == store.run_id for item in native)
 
 
+def test_snapshot_throttling_keeps_observations_durable_and_final_save_complete(store, monkeypatch):
+    """Fast scans commit every result without repeatedly rewriting their entire history."""
+    stats = Stats()
+    stats.set_file_paths(str(store.directory))
+    clock = [100.0]
+    stats._last_snapshot = clock[0]
+    monkeypatch.setattr("graphqler.utils.stats.time.monotonic", lambda: clock[0])
+    node = SimpleNamespace(name="sample", graphql_type="Query")
+    with recording(store):
+        for index in range(50):
+            result = Result(ResultEnum.GENERAL_SUCCESS, payload=str(index), status_code=200, graphql_response={"data": {"sample": index}})
+            stats.add_http_status_code(node.name, 200)
+            stats.update_stats_from_result(node, result)
+        with store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM results").fetchone()[0] == 50
+        assert not stats.pickle_save_path.exists()
+        clock[0] += 2
+        stats.update_stats_from_result(node, result)
+        snapshot = json.loads(stats.json_file_path.read_text())
+        assert snapshot["number_of_successes"] == 51
+        assert stats.pickle_save_path.is_file()
+        stats.update_stats_from_result(node, result)
+        assert json.loads(stats.json_file_path.read_text())["number_of_successes"] == 51
+        stats.save()
+        assert json.loads(stats.json_file_path.read_text())["number_of_successes"] == 52
+        with store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM results").fetchone()[0] == 52
+
+
+def test_single_chain_api_flushes_even_before_the_next_checkpoint(store, monkeypatch):
+    """The public chain API must finish its reports even for sub-second operations."""
+    from graphqler.chains import Chain
+    from graphqler.fuzzer import Fuzzer
+
+    fuzzer = Fuzzer.__new__(Fuzzer)
+    fuzzer.save_path, fuzzer.url = str(store.directory), store.target
+    fuzzer.stats = Stats()
+    fuzzer.stats.set_file_paths(str(store.directory))
+    fuzzer.stats._last_snapshot = 100.0
+    monkeypatch.setattr("graphqler.utils.stats.time.monotonic", lambda: 100.0)
+    node = SimpleNamespace(name="sample", graphql_type="Query")
+    result = Result(ResultEnum.GENERAL_SUCCESS, payload="{sample}", status_code=200, graphql_response={"data": {"sample": "ok"}})
+    monkeypatch.setattr(fuzzer, "_Fuzzer__run_chain", lambda chain: fuzzer.stats.update_stats_from_result(node, result))
+    with recording(store):
+        fuzzer.run_chain(Chain())
+    assert json.loads(fuzzer.stats.json_file_path.read_text())["number_of_successes"] == 1
+    assert fuzzer.stats.pickle_save_path.exists()
+    assert store.run_info()["summary"]["number_of_successes"] == 1
+
+
 def test_multiple_runs_preserve_history_and_export_only_current_run(store):
     """An empty subsequent run cannot inherit findings or a provenance export."""
     store.finding("Introspection Enabled", store.target, True, False, "__schema", "schema returned")

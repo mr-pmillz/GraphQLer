@@ -212,6 +212,7 @@ class Fuzzer:
             chain (Chain): The chain to execute.
         """
         self.__run_chain(chain)
+        self.stats.save()
 
     @cataloged("single")
     def run_single(self, node_name: str):

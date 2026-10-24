@@ -12,6 +12,10 @@ uv run graphqler --mode discover --input targets.txt --output discovery --format
 
 ## Structured results
 
+Each observation commits to SQLite immediately. Legacy statistics reports and
+pickles are checkpointed at most once a second during scanning, then flushed at
+normal completion. Use the catalog for live or interrupted-run evidence.
+
 | File | Contract |
 |---|---|
 | `manifest.json` | Version, completion status, counts, run/batch identity, selected formats, and export checksum. Always written. |

@@ -43,6 +43,20 @@ Special invocations:
 | `--discovery-timeout SECONDS` | Timeout per discovery request; default 5 seconds. |
 | `--discovery-max-time SECONDS` | Total discovery budget per target; default 60 seconds. |
 
+Discovery has 109 built-in paths, including `/graphql`, `/graphiql`, `/playground`,
+`/console`, `/explorer`, and GraphQL, GraphiQL, and playground routes under
+`/v1/` through `/v4/` and `/api/v1/` through `/api/v4/`. It also tries version
+suffixes such as `/graphql/v2`, Relay routes, gateway routes, and common PHP,
+JSON, and WordPress paths. The exact URL is tried first, followed by common
+paths under both the supplied prefix and the origin. Candidates are deduplicated
+and limited to 256 URLs; the default list uses at most 219 with a prefix.
+
+Each candidate is checked with a read-only GraphQL query over POST and, when
+needed, GET. An HTML IDE page alone does not confirm an API endpoint. Increase
+`--discovery-max-time` for slow hosts or use `--discovery-wordlist` to replace the
+defaults with a focused list. An automatic scan stops at its first confirmed
+POST endpoint; `--mode discover` searches for all matches within its time budget.
+
 See [output contracts and exit codes](output.md) for batch and findings-gate semantics.
 
 ## Authentication

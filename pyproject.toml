@@ -1,6 +1,6 @@
 [project]
 name = "GraphQLer"
-version = "2.4.0"
+dynamic = ["version"]
 description = "A cutting edge context aware GraphQL API fuzzing tool!"
 authors = [{ name = "Omar2535", email = "omar@9tsai.ca" }]
 maintainers = [{ name = "mr-pmillz" }]
@@ -63,7 +63,23 @@ exclude = ["sample-graphql-apis/"]
 
 [tool.uv]
 package = true
+cache-keys = [{ file = "pyproject.toml" }, { file = ".git_archival.txt" }, { git = { commit = true, tags = true } }]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+git_describe_command = "git describe --dirty --tags --long --match v[0-9]*"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "graphqler/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/graphqler", "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE",
+    "/build-requirements.txt", "/build-constraints.txt", "/.git_archival.txt", "/.gitattributes",
+]
 
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.32.4", "hatch-vcs==0.5.0", "setuptools-scm==10.3.4"]
 build-backend = "hatchling.build"

@@ -25,7 +25,7 @@ GraphQLer is a cutting-edge tool designed to dynamically test GraphQL APIs with 
 
 ## Key features
 
-- **Endpoint discovery**: Find GraphQL endpoints from a base URL, including versioned paths.
+- **Endpoint discovery**: Probe 109 common paths from a base URL, including versioned APIs, GraphiQL, playground, Relay, and gateway routes.
 - **Structured output**: One SQLite catalog, complete JSONL results, and JSONL/Markdown findings reports with evidence and run status.
 - **Batch execution**: Read targets from a file, repeated flags, or comma-separated URLs; isolate target outputs and return exit code 3 for partial success.
 - **Request generation**: Automatically generate valid queries and mutations based on the schema *(supports fragments, unions, interfaces, and enums based on the latest [GraphQL-spec](https://spec.graphql.org/October2021/#sec-ID))*
@@ -248,7 +248,7 @@ There are also variables that can be modified with the `--config` flag as a TOML
 | USE_OBJECTS_BUCKET | Whether or not to store object IDs for future use | Boolean | True |
 | USE_DEPENDENCY_GRAPH | Whether or not to use the dependency-aware feature | Boolean | True |
 | ALLOW_DELETION_OF_OBJECTS | Whether or not to allow deletions from the objects bucket | Boolean | False |
-| MAX_FUZZING_ITERATIONS | Maximum number of fuzzing payloads to run on a node | Integer | 5 |
+| MAX_FUZZING_ITERATIONS | Maximum number of complete sweeps through the chains | Integer | 1 |
 | MAX_TIME | The maximum time to run in seconds | Integer | 3600 |
 | TIME_BETWEEN_REQUESTS | Max time to wait between requests in seconds | Integer | 0.001 |
 | DEBUG | Debug mode | Boolean | False |

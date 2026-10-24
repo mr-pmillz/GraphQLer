@@ -23,6 +23,7 @@ env/
 
 # Compilation
 dist/
+graphqler/_version.py
 
 ## testing
 *-test/
